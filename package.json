@@ -1,0 +1,17 @@
+{
+  "name": "night-chapters",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gentle night flight through a personal sky. I want to see. I play.",
+  "scripts": {
+    "start": "npx --yes serve public -l 4343",
+    "serve": "npx --yes serve public -l 4343"
+  },
+  "keywords": [
+    "observatory",
+    "aladin",
+    "night-chapters",
+    "wonder-first"
+  ],
+  "license": "UNLICENSED"
+}

@@ -1,11 +1,16 @@
 # src/
 
-Playable flight layer lives here when implementation starts.
+v0 playable shell lives under **`public/`** (static Aladin + ES modules):
 
-Planned direction (not committed to a stack yet):
+| Path | Role |
+|------|------|
+| `public/index.html` | Cockpit chrome |
+| `public/js/windshield.js` | Aladin glass |
+| `public/js/flight.js` | Soft throttle / heading / fuel-of-night |
+| `public/js/game-loop.js` | BOOT→MENU→FLIGHT→…→CLOSEOUT |
+| `public/js/pins.js` | Personal waypoints (localStorage) |
+| `public/js/nights.js` | Chapter loader |
+| `public/data/nights/` | Night JSON |
+| `docs/GAME_LOOP.md` | Loop sketch |
 
-- Observatory glass / Aladin-style real-sky spine  
-- Chapter runner (load Night → glide → beats → mystery → closeout)  
-- Personal pin store (easy create + delete)
-
-Until then, this folder is a placeholder so the repo has a clear code home.
+Run: `npm start` → http://localhost:4343

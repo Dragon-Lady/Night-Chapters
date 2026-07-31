@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Night Chapters — I want to see. I play.</title>
+    <meta
+      name="description"
+      content="Gentle night flight through a personal sky. Wonder-first. Personal pins as waypoints. Aladin windshield."
+    />
+    <link rel="stylesheet" href="./css/night.css" />
+  </head>
+  <body id="app">
+    <header class="cockpit-top">
+      <h1>Night Chapters</h1>
+      <p class="tagline">I want to see. I play.</p>
+      <span id="state-chip" class="tagline">BOOT</span>
+    </header>
+
+    <div id="sky-stage">
+      <div id="aladin-lite-div" role="img" aria-label="Sky windshield — Aladin real-sky glass"></div>
+      <div class="reticle" aria-hidden="true"></div>
+    </div>
+
+    <section class="instruments" aria-label="Soft instruments">
+      <div class="panel">
+        <h2>Whisper</h2>
+        <p id="whisper" class="whisper">Warming the glass…</p>
+        <div class="row" style="margin-top: 0.65rem">
+          <button type="button" class="primary" id="btn-begin">Begin night</button>
+          <button type="button" id="btn-next" disabled>Next heading</button>
+          <button type="button" id="btn-skip" disabled>Skip fix</button>
+          <button type="button" id="btn-rest" disabled>Rest</button>
+          <button type="button" id="btn-pin" disabled title="P">Pin / Claim ✦</button>
+          <button type="button" id="btn-end" disabled>Closeout</button>
+        </div>
+        <label class="throttle" style="margin-top: 0.75rem">
+          Throttle (glide)
+          <input id="throttle" type="range" min="0" max="1" step="0.01" value="0.25" />
+        </label>
+      </div>
+
+      <div class="panel">
+        <h2>Soft instruments</h2>
+        <div class="meters">
+          <div>Heading bug: <strong id="heading-bug">—</strong></div>
+          <div>Fuel of the night: <strong id="fuel">—</strong></div>
+        </div>
+        <h2 style="margin-top: 0.75rem">Story ribbon</h2>
+        <ul id="pin-list" class="pin-list"></ul>
+        <h2 style="margin-top: 0.75rem">Nav log</h2>
+        <pre id="nav-log" class="nav-log">Nav log empty — soft start.</pre>
+      </div>
+    </section>
+
+    <p class="footer-note">
+      Windshield: Aladin Lite (CDS) · Personal pins in localStorage ·
+      <kbd>P</kbd> pin/claim · <kbd>Space</kbd> rest · Not a military sim ·
+      Wonder-first
+    </p>
+
+    <!-- Aladin Lite v3 — real-sky spine (same family as Dragon Lady Observatory) -->
+    <script
+      src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"
+      charset="utf-8"
+    ></script>
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>

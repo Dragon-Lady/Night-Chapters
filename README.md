@@ -60,9 +60,42 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**Scaffold / design home** — vision + schema checked in. Playable flight layer to follow.
+**v0 playable shell** — Aladin windshield, Soft Rainy Hold night, soft glide loop, personal pins (localStorage).
 
-Cottage continuity (private): `~/cottage/` · Observatory product: separate repo when linked.  
+### Run locally
+
+```bash
+cd ~/Projects/night-chapters   # or your clone
+npm start
+# → http://localhost:4343
+```
+
+Or serve `public/` with any static server.
+
+### Play (gentle)
+
+1. Wait for the sky glass (Aladin).  
+2. **Begin night** — Soft Rainy Hold.  
+3. Nudge **throttle**; glass glides toward the heading bug.  
+4. On arrive: read whisper · **Next heading** or **Skip fix** (allowed).  
+5. **Rest** / `Space` — no failure.  
+6. Near mystery: **P** or **Pin / Claim** to name it yours.  
+7. **Closeout** — nav log three-liner.
+
+### Layout
+
+```
+public/           # playable static app
+  index.html
+  css/night.css
+  js/             # game-loop, windshield, flight, pins, nights
+  data/nights/    # chapter JSON
+data/nights/      # same chapters (repo source copy)
+docs/             # VISION, GAME_LOOP, example night
+schema/           # entities + hooks
+```
+
+Cottage continuity (private): `~/cottage/` · Observatory: Dragon-Lady-Observatory.  
 This repo is the **Night Chapters** public home.
 
 ---
