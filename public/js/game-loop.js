@@ -248,6 +248,7 @@ export function startGame(ui) {
         return;
       }
       const step = windshield.glideStep(wp.view, session.throttle);
+      windshield.fx?.setThrottle(session.throttle);
       if (typeof ui?.onGlide === "function") ui.onGlide(step, wp);
 
       // Drift mysteries appear during glide (not only at chapter end)
@@ -394,6 +395,8 @@ export function startGame(ui) {
     if (!session) return;
     setThrottle(session, 0);
     if (el.throttle()) el.throttle().value = "0";
+    windshield.setMotionBlur?.(0);
+    windshield.fx?.setThrottle(0);
     setWhisper("Rest. Spoons recover. No failure.");
   }
 

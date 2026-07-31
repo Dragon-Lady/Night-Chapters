@@ -344,16 +344,35 @@ label.throttle {
 .pin-list li.done {
   border-color: rgba(158, 201, 255, 0.4);
   color: var(--signal);
+  box-shadow: 0 0 10px rgba(158, 201, 255, 0.15);
 }
 
 .pin-list li.current {
   border-color: rgba(232, 213, 163, 0.55);
   color: var(--glow);
+  box-shadow:
+    0 0 12px rgba(232, 213, 163, 0.35),
+    0 0 24px rgba(158, 201, 255, 0.12);
+  animation: pin-glow 2.4s ease-in-out infinite;
 }
 
 .pin-list li.drift {
   border-style: dashed;
   color: var(--glow);
+}
+
+@keyframes pin-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px rgba(232, 213, 163, 0.25),
+      0 0 18px rgba(158, 201, 255, 0.08);
+  }
+  50% {
+    box-shadow:
+      0 0 16px rgba(232, 213, 163, 0.5),
+      0 0 28px rgba(158, 201, 255, 0.18);
+  }
 }
 
 .fuel-track {
