@@ -1,0 +1,66 @@
+{
+  "id": "first-love-sky",
+  "title": "First Love Sky",
+  "tone": "tender rose — the night that remembered you",
+  "blurb": "Pleiades, soft cluster light, a shy chapter glow.",
+  "status": "ready",
+  "order": 4,
+  "weather_mood": "rose",
+  "sky": {
+    "mood": "rose",
+    "hue": 320,
+    "warmth": 0.55,
+    "starDensity": 1.1,
+    "cloudDensity": 0.9,
+    "survey": "P/DSS2/color"
+  },
+  "score": { "story": 14, "drift": 32, "chapter": 50, "free": 7, "perfect_bonus": 25 },
+  "whisper_start": "This night is shy and kind. Glide slow. Name only what you want to keep.",
+  "pins": [
+    {
+      "id": "seven-sisters",
+      "label": "Seven sisters",
+      "note": "The Pleiades — a handful of lights. Don’t rush them.",
+      "emotion": "tender",
+      "beat": "sit",
+      "personal": true,
+      "view": { "ra": 56.75, "dec": 24.1167, "fov": 2.0, "name": "Pleiades" }
+    },
+    {
+      "id": "hyades-door",
+      "label": "Door of V",
+      "note": "The Hyades / Taurus face. A doorway, not a test.",
+      "emotion": "soft",
+      "beat": "emotion_word",
+      "personal": true,
+      "view": { "ra": 66.75, "dec": 15.8667, "fov": 5.0, "name": "Hyades" }
+    },
+    {
+      "id": "double-cluster",
+      "label": "Twin jewels",
+      "note": "Double Cluster — two soft jewels. Sit if you need to.",
+      "emotion": "love",
+      "beat": "sit",
+      "personal": true,
+      "view": { "ra": 34.75, "dec": 57.15, "fov": 1.5, "name": "Double Cluster" }
+    }
+  ],
+  "drift_mysteries": [
+    {
+      "id": "drift-love-1",
+      "story_hook": "A blush-colored spark between the sisters and the door…",
+      "seed": { "ra": 61.0, "dec": 20.0, "fov": 2.0 }
+    },
+    {
+      "id": "drift-love-2",
+      "story_hook": "Something that almost has your name already.",
+      "seed": { "ra": 45.0, "dec": 40.0, "fov": 1.8 }
+    }
+  ],
+  "mystery": {
+    "id": "mystery-first-love",
+    "story_hook": "The shy chapter glow. Press P only if it feels like yours.",
+    "seed": { "ra": 52.0, "dec": 30.0, "fov": 1.3 },
+    "claimed_label": null
+  }
+}

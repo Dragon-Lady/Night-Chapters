@@ -20,6 +20,9 @@ export function createFxLayer(canvas) {
   let last = 0;
   let skyHue = 220; // blue-night default
   let skyWarmth = 0; // 0 cool → 1 gold (mystery)
+  let starDensity = 1;
+  let cloudDensity = 1;
+  let weatherMood = "rain";
 
   function resize() {
     const parent = canvas.parentElement;

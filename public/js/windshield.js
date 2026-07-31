@@ -246,6 +246,27 @@ export function createWindshield(
     if (stage) stage.dataset.phase = phase || "";
   }
 
+  /** Apply chapter sky mood + optional Aladin survey */
+  function applyChapterSky(night) {
+    const sky = night?.sky || { mood: night?.weather_mood || "rain" };
+    fx?.setWeather(sky);
+    const stage = document.getElementById("sky-stage");
+    if (stage) stage.dataset.weather = sky.mood || night?.weather_mood || "rain";
+    if (aladin && sky.survey && typeof aladin.setBaseImageLayer === "function") {
+      try {
+        aladin.setBaseImageLayer(sky.survey);
+      } catch {
+        /* survey may not exist on all builds */
+      }
+    } else if (aladin && sky.survey && typeof aladin.setImageSurvey === "function") {
+      try {
+        aladin.setImageSurvey(sky.survey);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   function wrapDeltaRa(d) {
     let x = d;
     while (x > 180) x -= 360;

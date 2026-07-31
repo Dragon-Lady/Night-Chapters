@@ -10,7 +10,7 @@
  * Wonder-first. Vanilla JS. Not a military sim.
  */
 
-import { loadNight } from "./nights.js";
+import { loadNight, listNights } from "./nights.js";
 import { createWindshield } from "./windshield.js";
 import {
   createFlightSession,
@@ -26,6 +26,8 @@ import {
   recordFreePin,
   discoveryCount,
   catalogSourcesForNight,
+  maybeApplyPerfectBonus,
+  scoreTable,
   ARRIVE_DEG,
   MYSTERY_NEAR_DEG,
   MYSTERY_NOTICE_DEG,
@@ -37,6 +39,9 @@ import {
   renderPersonalPinList,
   saveBestScore,
   loadBestScore,
+  saveChapterBest,
+  getChapterBest,
+  loadChapterBests,
 } from "./pins.js";
 
 export const CORE_LOOP_VERSION = "1.0.0";

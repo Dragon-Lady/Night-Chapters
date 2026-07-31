@@ -60,7 +60,7 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**Core loop v1.0 complete** — FLIGHT (throttle glide) · REST (Space, spoon recover) · MYSTERY (drift + chapter, P to claim) · personal pins (localStorage + glass) · wonder score. Pretty glass FX. Vanilla JS + Aladin.
+**Chapters v1.1** — four guided nights (Soft Rainy Hold, Gumdrop Summer, Clear Cold Glass, First Love Sky). MENU chapter picker, per-chapter scores + perfect bonus, unique sky moods. Core loop + pretty glass. Vanilla JS + Aladin.
 
 ### Run locally
 

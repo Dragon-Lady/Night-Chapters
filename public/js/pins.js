@@ -5,6 +5,7 @@
 
 const STORAGE_KEY = "night-chapters.personalPins.v1";
 const SCORE_KEY = "night-chapters.bestWonderScore.v1";
+const CHAPTER_SCORE_KEY = "night-chapters.chapterBest.v1";
 
 export function loadPersonalPins() {
   try {
@@ -74,6 +75,35 @@ export function saveBestScore(score) {
     return score;
   }
   return prev;
+}
+
+export function loadChapterBests() {
+  try {
+    const raw = localStorage.getItem(CHAPTER_SCORE_KEY);
+    if (!raw) return {};
+    const data = JSON.parse(raw);
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Save best wonder score for a single chapter id */
+export function saveChapterBest(nightId, score) {
+  if (!nightId) return score;
+  const all = loadChapterBests();
+  const prev = Number(all[nightId] || 0) || 0;
+  if (score > prev) {
+    all[nightId] = score;
+    localStorage.setItem(CHAPTER_SCORE_KEY, JSON.stringify(all));
+    return score;
+  }
+  return prev;
+}
+
+export function getChapterBest(nightId) {
+  const all = loadChapterBests();
+  return Number(all[nightId] || 0) || 0;
 }
 
 /** Render house pin chips into a container */

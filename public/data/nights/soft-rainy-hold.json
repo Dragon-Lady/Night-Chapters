@@ -2,8 +2,19 @@
   "id": "soft-rainy-hold",
   "title": "Soft Rainy Hold",
   "tone": "quiet recovery — the sky waited",
+  "blurb": "Rain on the glass. Start from known light.",
   "status": "ready",
-  "weather_mood": "soft rainy hold",
+  "order": 1,
+  "weather_mood": "rain",
+  "sky": {
+    "mood": "rain",
+    "hue": 210,
+    "warmth": 0.1,
+    "starDensity": 0.9,
+    "cloudDensity": 1.6,
+    "survey": "P/DSS2/color"
+  },
+  "score": { "story": 10, "drift": 25, "chapter": 40, "free": 5, "perfect_bonus": 15 },
   "whisper_start": "We start from known light. Glide soft. Watch for ✧ drift glows off the ribbon.",
   "pins": [
     {
@@ -36,19 +47,19 @@
   ],
   "drift_mysteries": [
     {
-      "id": "drift-between-1-2",
-      "story_hook": "A pale spark off the path between comfort and the day you left…",
+      "id": "drift-rain-1",
+      "story_hook": "A pale spark between comfort and the day you left…",
       "seed": { "ra": 180.0, "dec": 20.0, "fov": 2.0 }
     },
     {
-      "id": "drift-between-2-3",
-      "story_hook": "Something quiet near the personal star’s approach — not on the ribbon, not a test.",
+      "id": "drift-rain-2",
+      "story_hook": "Something quiet near the personal star’s approach.",
       "seed": { "ra": 245.0, "dec": 46.0, "fov": 1.8 }
     }
   ],
   "mystery": {
-    "id": "mystery-glow",
-    "story_hook": "Chapter glow unlabeled. Get close. Press P — name it yours.",
+    "id": "mystery-rain",
+    "story_hook": "Chapter glow in the soft rain. Press P — name it yours.",
     "seed": { "ra": 41.9672, "dec": 21.3918, "fov": 1.2 },
     "claimed_label": null
   }

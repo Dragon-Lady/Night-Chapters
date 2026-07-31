@@ -1,8 +1,22 @@
-# Game loop — Night Chapters **core complete** v1.0
+# Game loop — Night Chapters **core complete** v1.1 (multi-chapter)
 
-**Status:** Core loop implemented in vanilla JS (`public/js/game-loop.js` · `flight.js` · `pins.js` · `windshield.js`).  
-**Version:** `CORE_LOOP_VERSION = 1.0.0`  
+**Status:** Core loop + guided chapter catalog in vanilla JS.  
+**Version:** `CORE_LOOP_VERSION = 1.0.0` (+ chapters)  
 **Tagline:** *I want to see. I play.*
+
+## Guided chapters (MENU)
+
+Pick a night before **Begin**:
+
+| Id | Title | Sky mood | Route feel |
+|----|--------|----------|------------|
+| `soft-rainy-hold` | Soft Rainy Hold | rain | M42 → Vega → M51 |
+| `gumdrop-summer` | Gumdrop Summer | warm | Altair → Vega → Deneb (Mellinger) |
+| `clear-cold-glass` | Clear Cold Glass | cold | Cassiopeia → Polaris → M31 |
+| `first-love-sky` | First Love Sky | rose | Pleiades → Hyades → Double Cluster |
+
+Each chapter has unique story pins, 2 drift mysteries, 1 chapter mystery, and a `score` table + `sky` FX profile.  
+JSON: `public/data/nights/*.json` · catalog: `nights.js` `CHAPTER_INDEX`.
 
 ---
 

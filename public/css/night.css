@@ -261,6 +261,82 @@ header .tagline {
   min-height: 2.6em;
 }
 
+/* Chapter selection (MENU) */
+.chapter-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.45rem;
+}
+
+.chapter-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--mist);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.chapter-card:hover {
+  border-color: rgba(158, 201, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.chapter-card.selected {
+  border-color: rgba(232, 213, 163, 0.55);
+  box-shadow: 0 0 16px rgba(232, 213, 163, 0.2);
+}
+
+.chapter-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--mist);
+}
+
+.chapter-blurb {
+  font-size: 0.68rem;
+  color: var(--mist-dim);
+  line-height: 1.3;
+}
+
+.chapter-meta {
+  font-size: 0.65rem;
+  color: var(--signal);
+  opacity: 0.85;
+}
+
+.chapter-card.weather-rain {
+  background: linear-gradient(145deg, rgba(20, 40, 70, 0.5), rgba(0, 0, 0, 0.35));
+}
+.chapter-card.weather-warm {
+  background: linear-gradient(145deg, rgba(70, 40, 20, 0.45), rgba(0, 0, 0, 0.35));
+}
+.chapter-card.weather-cold {
+  background: linear-gradient(145deg, rgba(20, 50, 80, 0.55), rgba(0, 0, 0, 0.35));
+}
+.chapter-card.weather-rose {
+  background: linear-gradient(145deg, rgba(60, 25, 50, 0.5), rgba(0, 0, 0, 0.35));
+}
+
+#sky-stage[data-weather="warm"] {
+  border-color: rgba(255, 180, 100, 0.22);
+}
+#sky-stage[data-weather="cold"] {
+  border-color: rgba(140, 200, 255, 0.28);
+}
+#sky-stage[data-weather="rose"] {
+  border-color: rgba(230, 150, 190, 0.28);
+}
+#sky-stage[data-weather="rain"] {
+  border-color: rgba(120, 160, 210, 0.2);
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

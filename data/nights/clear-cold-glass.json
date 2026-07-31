@@ -1,0 +1,66 @@
+{
+  "id": "clear-cold-glass",
+  "title": "Clear Cold Glass",
+  "tone": "crisp quiet — frost on the edges",
+  "blurb": "Winter-clear. Cassiopeia, the pole, and a deep galaxy.",
+  "status": "ready",
+  "order": 3,
+  "weather_mood": "cold",
+  "sky": {
+    "mood": "cold",
+    "hue": 200,
+    "warmth": 0.05,
+    "starDensity": 1.4,
+    "cloudDensity": 0.35,
+    "survey": "P/DSS2/color"
+  },
+  "score": { "story": 11, "drift": 30, "chapter": 48, "free": 5, "perfect_bonus": 22 },
+  "whisper_start": "Cold clear glass. Every star is a pinprick. Glide carefully — spoons still matter.",
+  "pins": [
+    {
+      "id": "cass-W",
+      "label": "W of the queen",
+      "note": "Cassiopeia — the bright W. Trace it with your eyes.",
+      "emotion": "focus",
+      "beat": "sit",
+      "personal": true,
+      "view": { "ra": 14.177, "dec": 60.716, "fov": 8.0, "name": "Cassiopeia" }
+    },
+    {
+      "id": "polaris-hold",
+      "label": "Still point",
+      "note": "Near the pole. The sky turns around you. Rest is allowed.",
+      "emotion": "still",
+      "beat": "sit",
+      "personal": true,
+      "view": { "ra": 37.9545, "dec": 89.2641, "fov": 4.0, "name": "Polaris" }
+    },
+    {
+      "id": "andromeda",
+      "label": "Neighbor island",
+      "note": "M31 — another island of light. Soft zoom.",
+      "emotion": "awe",
+      "beat": "emotion_word",
+      "personal": true,
+      "view": { "ra": 10.6847, "dec": 41.269, "fov": 1.8, "name": "M31" }
+    }
+  ],
+  "drift_mysteries": [
+    {
+      "id": "drift-cold-1",
+      "story_hook": "A frost spark between the W and the still point…",
+      "seed": { "ra": 25.0, "dec": 75.0, "fov": 2.5 }
+    },
+    {
+      "id": "drift-cold-2",
+      "story_hook": "Ice-blue dust on the way to the neighbor island.",
+      "seed": { "ra": 20.0, "dec": 50.0, "fov": 2.0 }
+    }
+  ],
+  "mystery": {
+    "id": "mystery-cold",
+    "story_hook": "A cold unlabeled glow. Press P — give it a winter name.",
+    "seed": { "ra": 30.0, "dec": 55.0, "fov": 1.5 },
+    "claimed_label": null
+  }
+}

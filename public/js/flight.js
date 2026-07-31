@@ -7,13 +7,25 @@ export const ARRIVE_DEG = 0.35;
 export const MYSTERY_NEAR_DEG = 1.35;
 export const MYSTERY_NOTICE_DEG = 4.0;
 
-/** Wonder score — curiosity, not combat points */
+/** Default wonder score — overridden per chapter via night.score */
 export const SCORE = {
   STORY_PIN: 10,
   DRIFT_MYSTERY: 25,
   CHAPTER_MYSTERY: 40,
   FREE_PIN: 5,
 };
+
+/** Resolve per-chapter score table */
+export function scoreTable(night) {
+  const s = night?.score || {};
+  return {
+    STORY_PIN: s.story ?? SCORE.STORY_PIN,
+    DRIFT_MYSTERY: s.drift ?? SCORE.DRIFT_MYSTERY,
+    CHAPTER_MYSTERY: s.chapter ?? SCORE.CHAPTER_MYSTERY,
+    FREE_PIN: s.free ?? SCORE.FREE_PIN,
+    PERFECT_BONUS: s.perfect_bonus ?? 15,
+  };
+}
 
 export function createFlightSession(night) {
   const drift = (night.drift_mysteries || night.mysteries || []).map((m, i) => ({
@@ -25,6 +37,8 @@ export function createFlightSession(night) {
     noticed: false,
     claimed_label: null,
   }));
+
+  const table = scoreTable(night);
 
   return {
     nightId: night.id,
@@ -40,6 +54,7 @@ export function createFlightSession(night) {
     mysteryNear: false,
     activeDriftId: null,
     driftMysteries: drift,
+    scoreTable: table,
     discovered: {
       storyPins: [],
       driftMysteries: [],
@@ -47,6 +62,7 @@ export function createFlightSession(night) {
       freePins: 0,
     },
     score: 0,
+    perfectBonusApplied: false,
     navLog: [],
     startedAt: null,
     endedAt: null,
@@ -78,14 +94,17 @@ export function currentWaypoint(night, session) {
 
 export function markArrived(session, waypoint) {
   if (!waypoint) return session;
+  const T = session.scoreTable || SCORE;
   if (waypoint.kind === "pin") {
     const id = waypoint.pin.id;
     if (!session.fixesVisited.includes(id)) {
       session.fixesVisited.push(id);
       if (!session.discovered.storyPins.includes(id)) {
         session.discovered.storyPins.push(id);
-        session.score += SCORE.STORY_PIN;
-        session.navLog.push(`Arrived: ${waypoint.pin.label} (+${SCORE.STORY_PIN})`);
+        session.score += T.STORY_PIN;
+        session.navLog.push(
+          `Arrived: ${waypoint.pin.label} (+${T.STORY_PIN})`
+        );
       } else {
         session.navLog.push(`Arrived: ${waypoint.pin.label}`);
       }
@@ -170,32 +189,55 @@ export function nearestDriftMystery(session, view) {
 
 export function claimDriftMystery(session, mystery, label) {
   if (!mystery || mystery.claimed) return null;
+  const T = session.scoreTable || SCORE;
   mystery.claimed = true;
   mystery.claimed_label = label;
   if (!session.discovered.driftMysteries.includes(mystery.id)) {
     session.discovered.driftMysteries.push(mystery.id);
-    session.score += SCORE.DRIFT_MYSTERY;
+    session.score += T.DRIFT_MYSTERY;
   }
-  session.navLog.push(`Drift mystery: ${label} (+${SCORE.DRIFT_MYSTERY})`);
+  session.navLog.push(`Drift mystery: ${label} (+${T.DRIFT_MYSTERY})`);
   session.activeDriftId = null;
   return mystery;
 }
 
 export function claimChapterMystery(session, label) {
   if (session.mysteryClaimed) return session;
+  const T = session.scoreTable || SCORE;
   session.mysteryClaimed = true;
   if (!session.discovered.chapterMystery) {
     session.discovered.chapterMystery = true;
-    session.score += SCORE.CHAPTER_MYSTERY;
+    session.score += T.CHAPTER_MYSTERY;
   }
-  session.navLog.push(`Chapter mystery: ${label} (+${SCORE.CHAPTER_MYSTERY})`);
+  session.navLog.push(`Chapter mystery: ${label} (+${T.CHAPTER_MYSTERY})`);
   return session;
 }
 
 export function recordFreePin(session) {
+  const T = session.scoreTable || SCORE;
   session.discovered.freePins = (session.discovered.freePins || 0) + 1;
-  session.score += SCORE.FREE_PIN;
-  session.navLog.push(`House pin (+${SCORE.FREE_PIN})`);
+  session.score += T.FREE_PIN;
+  session.navLog.push(`House pin (+${T.FREE_PIN})`);
+}
+
+/** Perfect chapter: all story pins + all drift + chapter mystery */
+export function maybeApplyPerfectBonus(session, night) {
+  if (!session || session.perfectBonusApplied) return 0;
+  const T = session.scoreTable || scoreTable(night);
+  const storyOk =
+    (session.discovered.storyPins?.length || 0) >= (night?.pins?.length || 0);
+  const driftOk =
+    (session.discovered.driftMysteries?.length || 0) >=
+    (session.driftMysteries?.length || 0);
+  const mystOk =
+    !night?.mystery || session.discovered.chapterMystery === true;
+  if (storyOk && driftOk && mystOk && (night?.pins?.length || 0) > 0) {
+    session.perfectBonusApplied = true;
+    session.score += T.PERFECT_BONUS || 0;
+    session.navLog.push(`Perfect chapter bonus (+${T.PERFECT_BONUS})`);
+    return T.PERFECT_BONUS || 0;
+  }
+  return 0;
 }
 
 export function discoveryCount(session) {
@@ -212,7 +254,9 @@ export function closeoutLines(session, night) {
   const disc = discoveryCount(session);
   const lines = [
     `Night: ${night?.title || session.nightId}`,
-    `Discovered: ${disc} · wonder score ${session.score}`,
+    `Discovered: ${disc} · wonder score ${session.score}${
+      session.perfectBonusApplied ? " · perfect" : ""
+    }`,
     session.navLog.filter((l) => !l.startsWith("---")).slice(-1)[0] ||
       "Flew soft. Saw something.",
   ];
