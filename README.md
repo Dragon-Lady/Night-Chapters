@@ -60,7 +60,7 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**Progress v1.2** — persistent completed chapters, chapter/house best scores, pin house (fly/delete/clear), wonder reflection at closeout. Four guided nights + core loop + pretty glass. Vanilla JS + Aladin. See `docs/PROGRESS.md`.
+**Audio v1.3** — Web Audio ambients per chapter (rain / warm / cold / rose), pin chimes, mystery hum, throttle wind, rest silence, mute. Plus progress, pin house, four nights, core loop, pretty glass. Vanilla JS + Aladin. See `docs/AUDIO.md` · `docs/PROGRESS.md`.
 
 ### Run locally
 

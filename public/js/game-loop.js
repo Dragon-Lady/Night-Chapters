@@ -50,8 +50,9 @@ import {
   saveReflection,
   renderProgressSummary,
 } from "./progress.js";
+import { createAudio } from "./audio.js";
 
-export const CORE_LOOP_VERSION = "1.2.0";
+export const CORE_LOOP_VERSION = "1.3.0";
 
 const State = {
   BOOT: "BOOT",

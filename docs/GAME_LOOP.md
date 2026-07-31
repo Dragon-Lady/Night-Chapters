@@ -1,9 +1,9 @@
 # Game loop — Night Chapters **core complete** v1.1 (multi-chapter)
 
-**Status:** Core loop + chapters + **persistent progress & reflection**.  
-**Version:** `CORE_LOOP_VERSION = 1.2.0`  
+**Status:** Core loop + chapters + progress + **soft Web Audio**.  
+**Version:** `CORE_LOOP_VERSION = 1.3.0`  
 **Tagline:** *I want to see. I play.*  
-**Progress docs:** [`PROGRESS.md`](./PROGRESS.md)
+**Docs:** [`PROGRESS.md`](./PROGRESS.md) · [`AUDIO.md`](./AUDIO.md)
 
 ## Guided chapters (MENU)
 

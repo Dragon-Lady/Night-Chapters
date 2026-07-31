@@ -52,6 +52,12 @@ header.cockpit-top {
   padding: 0.75rem 1rem 0.35rem;
 }
 
+.mute-btn {
+  margin-left: auto;
+  font-size: 0.72rem;
+  padding: 0.3rem 0.7rem;
+}
+
 header h1 {
   margin: 0;
   font-size: 1.05rem;
