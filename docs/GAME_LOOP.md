@@ -1,8 +1,9 @@
 # Game loop — Night Chapters **core complete** v1.1 (multi-chapter)
 
-**Status:** Core loop + guided chapter catalog in vanilla JS.  
-**Version:** `CORE_LOOP_VERSION = 1.0.0` (+ chapters)  
-**Tagline:** *I want to see. I play.*
+**Status:** Core loop + chapters + **persistent progress & reflection**.  
+**Version:** `CORE_LOOP_VERSION = 1.2.0`  
+**Tagline:** *I want to see. I play.*  
+**Progress docs:** [`PROGRESS.md`](./PROGRESS.md)
 
 ## Guided chapters (MENU)
 
@@ -101,17 +102,20 @@ Wonder-first: empty spoons mean *rest*, not fail.
 
 ### Wonder score (pins discovered)
 
-| Discovery | Points |
-|-----------|--------|
-| Story pin arrived | +10 |
-| Drift mystery claimed | +25 |
-| Chapter mystery claimed | +40 |
-| Free personal pin | +5 |
-| Skip story pin | +0 |
+Defaults (overridden per chapter via `night.score`):
+
+| Discovery | Default | Notes |
+|-----------|---------|--------|
+| Story pin arrived | +10 | e.g. First Love +14 |
+| Drift mystery claimed | +25 | varies by chapter |
+| Chapter mystery claimed | +40 | varies |
+| Free personal pin | +5 | varies |
+| Perfect chapter bonus | +15 | all story + all drift + chapter mystery |
+| Skip story pin | +0 | allowed |
 
 - **Pins discovered** = story + drift + chapter + free count  
-- **Best wonder** → `night-chapters.bestWonderScore.v1`  
-- Shown on instruments + closeout  
+- **House best** → `night-chapters.bestWonderScore.v1`  
+- **Chapter best** → `night-chapters.chapterBest.v1` (map by night id)  
 
 Not a combat score — curiosity only.
 

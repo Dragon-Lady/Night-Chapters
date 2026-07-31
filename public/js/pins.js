@@ -1,6 +1,6 @@
 /**
- * Personal pins as waypoints — house mythology on the glass.
- * Visuals + localStorage save. Easy create; easy forget.
+ * Personal pin house — localStorage mythology.
+ * View, fly-to, delete. Easy create; easy forget.
  */
 
 const STORAGE_KEY = "night-chapters.personalPins.v1";
@@ -32,6 +32,7 @@ export function claimPin({
   emotion = "wonder",
   nightId,
   kind = "personal",
+  chapterTitle = "",
 }) {
   const pins = loadPersonalPins();
   const pin = {
@@ -42,6 +43,7 @@ export function claimPin({
     kind, // personal | drift | chapter | story
     personal: true,
     nightId: nightId || null,
+    chapterTitle: chapterTitle || null,
     view: {
       ra: view.ra,
       dec: view.dec,
@@ -50,7 +52,7 @@ export function claimPin({
     created_at: new Date().toISOString(),
   };
   pins.unshift(pin);
-  savePersonalPins(pins.slice(0, 40));
+  savePersonalPins(pins.slice(0, 60));
   return pin;
 }
 
@@ -58,6 +60,11 @@ export function deletePin(id) {
   const next = loadPersonalPins().filter((p) => p.id !== id);
   savePersonalPins(next);
   return next;
+}
+
+export function clearAllPins() {
+  savePersonalPins([]);
+  return [];
 }
 
 export function loadBestScore() {
@@ -88,7 +95,6 @@ export function loadChapterBests() {
   }
 }
 
-/** Save best wonder score for a single chapter id */
 export function saveChapterBest(nightId, score) {
   if (!nightId) return score;
   const all = loadChapterBests();
@@ -106,38 +112,97 @@ export function getChapterBest(nightId) {
   return Number(all[nightId] || 0) || 0;
 }
 
-/** Render house pin chips into a container */
-export function renderPersonalPinList(container, { onFly, onDelete } = {}) {
+/**
+ * Full house list UI — filterable, fly-to, delete.
+ */
+export function renderPersonalPinList(
+  container,
+  { onFly, onDelete, onClear, filterNightId = null } = {}
+) {
   if (!container) return;
-  const pins = loadPersonalPins();
+  let pins = loadPersonalPins();
+  if (filterNightId) {
+    pins = pins.filter((p) => p.nightId === filterNightId);
+  }
+
   container.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "house-header";
+  header.innerHTML = `
+    <span class="house-count">${pins.length} pin${pins.length === 1 ? "" : "s"}</span>
+    <button type="button" class="house-clear" ${pins.length ? "" : "disabled"} title="Clear all house pins">Clear all</button>
+  `;
+  header.querySelector(".house-clear")?.addEventListener("click", () => {
+    if (!pins.length) return;
+    if (
+      !window.confirm(
+        "Clear all house pins? This only removes saved pins, not chapter progress."
+      )
+    ) {
+      return;
+    }
+    clearAllPins();
+    renderPersonalPinList(container, { onFly, onDelete, onClear, filterNightId });
+    onClear?.();
+  });
+  container.appendChild(header);
+
   if (!pins.length) {
-    container.innerHTML =
-      '<p class="pin-empty">No house pins yet — press <kbd>P</kbd> when something feels yours.</p>';
+    const empty = document.createElement("p");
+    empty.className = "pin-empty";
+    empty.innerHTML =
+      "No house pins yet — press <kbd>P</kbd> when something feels yours.";
+    container.appendChild(empty);
     return;
   }
+
+  const list = document.createElement("div");
+  list.className = "house-pin-list";
+
   for (const p of pins) {
     const row = document.createElement("div");
     row.className = `house-pin kind-${p.kind || "personal"}`;
+    const when = p.created_at
+      ? new Date(p.created_at).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })
+      : "";
     row.innerHTML = `
-      <button type="button" class="house-pin-fly" title="Fly here">📌 ${escapeHtml(
-        p.label
-      )}</button>
-      <span class="house-pin-meta">${escapeHtml(p.emotion || "")} · ${
-      p.kind || "personal"
-    }</span>
-      <button type="button" class="house-pin-del" title="Remove" aria-label="Delete pin">×</button>
+      <div class="house-pin-main">
+        <button type="button" class="house-pin-fly" title="Fly to this pin">
+          📌 ${escapeHtml(p.label)}
+        </button>
+        <span class="house-pin-meta">
+          ${escapeHtml(p.emotion || "wonder")}
+          · ${escapeHtml(p.kind || "personal")}
+          ${p.chapterTitle ? ` · ${escapeHtml(p.chapterTitle)}` : ""}
+          ${when ? ` · ${when}` : ""}
+        </span>
+        ${p.note ? `<span class="house-pin-note">${escapeHtml(p.note.slice(0, 120))}</span>` : ""}
+      </div>
+      <div class="house-pin-actions">
+        <button type="button" class="house-pin-fly-btn" title="Fly here">Fly</button>
+        <button type="button" class="house-pin-del" title="Remove" aria-label="Delete pin">×</button>
+      </div>
     `;
-    row.querySelector(".house-pin-fly")?.addEventListener("click", () => {
-      onFly?.(p);
-    });
+    const fly = () => onFly?.(p);
+    row.querySelector(".house-pin-fly")?.addEventListener("click", fly);
+    row.querySelector(".house-pin-fly-btn")?.addEventListener("click", fly);
     row.querySelector(".house-pin-del")?.addEventListener("click", () => {
       deletePin(p.id);
-      renderPersonalPinList(container, { onFly, onDelete });
+      renderPersonalPinList(container, {
+        onFly,
+        onDelete,
+        onClear,
+        filterNightId,
+      });
       onDelete?.(p);
     });
-    container.appendChild(row);
+    list.appendChild(row);
   }
+  container.appendChild(list);
 }
 
 function escapeHtml(s) {

@@ -344,6 +344,7 @@ export function createWindshield(
     setOverlays,
     setPhase,
     setMotionBlur,
+    applyChapterSky,
     get fx() {
       return fx;
     },

@@ -24,9 +24,34 @@
       <div class="reticle" aria-hidden="true"></div>
     </div>
 
+    <!-- Wonder reflection at closeout -->
+    <div
+      id="reflection-screen"
+      class="reflection-screen"
+      hidden
+      aria-hidden="true"
+      role="dialog"
+      aria-labelledby="reflection-title"
+    >
+      <div class="reflection-card">
+        <h2 id="reflection-title">Wonder reflection</h2>
+        <p class="reflection-score-line">
+          Wonder score: <strong id="reflection-score">0</strong>
+        </p>
+        <div id="reflection-body" class="reflection-body"></div>
+        <div class="row reflection-actions">
+          <button type="button" class="primary" id="btn-reflection-done">
+            Back to nights
+          </button>
+          <button type="button" id="btn-reflection-again">Fly again</button>
+        </div>
+      </div>
+    </div>
+
     <section class="instruments" aria-label="Soft instruments">
       <div class="panel">
         <h2>Choose a night</h2>
+        <div id="progress-summary" class="progress-summary"></div>
         <div id="chapter-list" class="chapter-list" role="listbox" aria-label="Guided night chapters"></div>
         <h2 style="margin-top: 0.75rem">Whisper</h2>
         <p id="whisper" class="whisper">Warming the glass…</p>
@@ -58,6 +83,7 @@
           <div>Wonder score: <strong id="score">0</strong></div>
           <div>Pins discovered: <strong id="discovered">0</strong></div>
           <div>Best wonder: <strong id="best-score">0</strong></div>
+          <div>Chapter best: <strong id="chapter-best">0</strong></div>
         </div>
         <h2 style="margin-top: 0.75rem">Story ribbon</h2>
         <ul id="pin-list" class="pin-list"></ul>

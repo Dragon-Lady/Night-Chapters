@@ -476,21 +476,55 @@ label.throttle {
   background: linear-gradient(90deg, #8a5a5a, #d4a0a0);
 }
 
+.progress-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.72rem;
+  color: var(--mist-dim);
+  margin-bottom: 0.5rem;
+}
+
+.progress-summary strong {
+  color: var(--signal);
+  font-weight: 500;
+}
+
 .house-pins {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  max-height: 140px;
+  gap: 0.4rem;
+  max-height: 200px;
   overflow: auto;
+}
+
+.house-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--mist-dim);
+}
+
+.house-clear {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.55rem;
+}
+
+.house-pin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .house-pin {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 0.35rem 0.5rem;
   font-size: 0.75rem;
-  padding: 0.3rem 0.45rem;
+  padding: 0.4rem 0.5rem;
   border-radius: 0.5rem;
   border: 1px solid var(--border);
   background: rgba(0, 0, 0, 0.25);
@@ -501,12 +535,20 @@ label.throttle {
   border-color: rgba(232, 213, 163, 0.35);
 }
 
+.house-pin-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
 .house-pin-fly {
   border: none;
   background: transparent;
   color: var(--signal);
   padding: 0;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   cursor: pointer;
   text-align: left;
 }
@@ -517,7 +559,25 @@ label.throttle {
 
 .house-pin-meta {
   color: var(--mist-dim);
-  flex: 1;
+  font-size: 0.68rem;
+}
+
+.house-pin-note {
+  color: var(--mist-dim);
+  font-size: 0.68rem;
+  opacity: 0.9;
+  font-style: italic;
+}
+
+.house-pin-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.house-pin-fly-btn {
+  font-size: 0.68rem;
+  padding: 0.2rem 0.5rem;
 }
 
 .house-pin-del {
@@ -538,6 +598,81 @@ label.throttle {
   margin: 0;
   font-size: 0.75rem;
   color: var(--mist-dim);
+}
+
+.chapter-card.completed .chapter-title {
+  color: var(--signal);
+}
+
+/* Wonder reflection overlay */
+.reflection-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(3, 5, 12, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.reflection-screen[hidden] {
+  display: none !important;
+}
+
+.reflection-card {
+  width: min(420px, 100%);
+  background: var(--glass);
+  border: 1px solid rgba(232, 213, 163, 0.3);
+  border-radius: 1rem;
+  padding: 1.25rem 1.35rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.reflection-card h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.1rem;
+  color: var(--glow);
+  font-weight: 600;
+}
+
+.reflection-score-line {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+  color: var(--mist-dim);
+}
+
+.reflection-score-line strong {
+  color: var(--signal);
+  font-size: 1.15rem;
+}
+
+.reflection-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+
+.reflection-line {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--mist);
+}
+
+.reflection-line strong {
+  color: var(--glow);
+  font-weight: 600;
+}
+
+.reflection-actions {
+  justify-content: flex-start;
+}
+
+body.reflection-open .instruments {
+  pointer-events: none;
+  opacity: 0.45;
 }
 
 body[data-phase="MYSTERY"] .reticle::after {

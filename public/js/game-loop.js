@@ -43,8 +43,16 @@ import {
   getChapterBest,
   loadChapterBests,
 } from "./pins.js";
+import {
+  recordChapterComplete,
+  isChapterCompleted,
+  buildReflection,
+  saveReflection,
+  renderProgressSummary,
+  loadProgress,
+} from "./progress.js";
 
-export const CORE_LOOP_VERSION = "1.0.0";
+export const CORE_LOOP_VERSION = "1.2.0";
 
 const State = {
   BOOT: "BOOT",
@@ -67,6 +75,7 @@ export function startGame(ui) {
   const windshield = createWindshield("#aladin-lite-div");
   let night = null;
   let session = null;
+  let selectedNightId = "soft-rainy-hold";
   let state = State.BOOT;
   /** State to return to when leaving REST */
   let resumeState = State.FLIGHT;
@@ -85,6 +94,8 @@ export function startGame(ui) {
     score: () => document.getElementById("score"),
     discovered: () => document.getElementById("discovered"),
     best: () => document.getElementById("best-score"),
+    chapterBest: () => document.getElementById("chapter-best"),
+    chapters: () => document.getElementById("chapter-list"),
     pins: () => document.getElementById("pin-list"),
     housePins: () => document.getElementById("house-pins"),
     navLog: () => document.getElementById("nav-log"),
@@ -107,6 +118,14 @@ export function startGame(ui) {
     if (chip) chip.textContent = next;
     document.body.dataset.phase = next;
     windshield.setPhase?.(next);
+    const list = el.chapters();
+    if (list) {
+      list.hidden = !(
+        next === State.MENU ||
+        next === State.CLOSEOUT ||
+        next === State.BOOT
+      );
+    }
     syncButtons();
   }
 
@@ -163,6 +182,54 @@ export function startGame(ui) {
         setWhisper("House pin removed.");
       },
     });
+  }
+
+  function renderChapterMenu() {
+    const root = el.chapters();
+    if (!root) return;
+    const bests = loadChapterBests();
+    root.innerHTML = "";
+    root.hidden = !(state === State.MENU || state === State.CLOSEOUT || state === State.BOOT);
+    for (const c of listNights()) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = `chapter-card weather-${c.weather_mood || "rain"}`;
+      if (c.id === selectedNightId) card.classList.add("selected");
+      const best = bests[c.id] || 0;
+      card.innerHTML = `
+        <span class="chapter-title">${escapeHtml(c.title)}</span>
+        <span class="chapter-blurb">${escapeHtml(c.blurb || c.tone || "")}</span>
+        <span class="chapter-meta">best ${best} · ${escapeHtml(c.weather_mood || "")}</span>
+      `;
+      card.addEventListener("click", () => selectChapter(c.id));
+      root.appendChild(card);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function selectChapter(id) {
+    selectedNightId = id;
+    night = await loadNight(id);
+    windshield.applyChapterSky?.(night);
+    const first = night.pins?.[0]?.view;
+    if (first && windshield.ready) windshield.goto(first, { hard: true });
+    refreshOverlays();
+    renderChapterMenu();
+    if (el.chapterBest()) {
+      el.chapterBest().textContent = String(getChapterBest(id));
+    }
+    const T = scoreTable(night);
+    setWhisper(
+      `${night.title} — ${night.blurb || night.tone || ""}. Score: story +${T.STORY_PIN}, drift +${T.DRIFT_MYSTERY}, chapter +${T.CHAPTER_MYSTERY}. Begin when ready.`
+    );
+    renderMeters();
   }
 
   function renderPins() {
@@ -252,7 +319,15 @@ export function startGame(ui) {
       el.score().textContent = "0";
     }
     if (el.best()) el.best().textContent = String(loadBestScore());
+    if (el.chapterBest()) {
+      el.chapterBest().textContent = String(
+        getChapterBest(session?.nightId || selectedNightId)
+      );
+    }
     renderPins();
+    if (state === State.MENU || state === State.CLOSEOUT) {
+      renderChapterMenu();
+    }
   }
 
   // ——— REST ———
@@ -451,16 +526,18 @@ export function startGame(ui) {
   async function boot() {
     setState(State.BOOT);
     setWhisper("Warming the glass…");
-    night = await loadNight("soft-rainy-hold");
+    night = await loadNight(selectedNightId);
     await waitFor(() => typeof A !== "undefined", 8000);
     windshield.boot();
     windshield.whenReady(() => {
+      windshield.applyChapterSky?.(night);
       setState(State.MENU);
       setWhisper(
-        `${night.title}. ${night.whisper_start || "I want to see. I play."} Best wonder: ${loadBestScore()}. Core loop ${CORE_LOOP_VERSION}.`
+        `Choose a night, then Begin. Best wonder: ${loadBestScore()}. Loop ${CORE_LOOP_VERSION}.`
       );
       refreshOverlays();
       renderHousePins();
+      renderChapterMenu();
       if (el.btnBegin()) el.btnBegin().disabled = false;
       renderMeters();
     });
@@ -470,13 +547,15 @@ export function startGame(ui) {
   }
 
   function beginFlight() {
-    loadNight("soft-rainy-hold").then((n) => {
+    loadNight(selectedNightId).then((n) => {
       night = n;
+      windshield.applyChapterSky?.(night);
       session = createFlightSession(night);
       session.startedAt = Date.now();
-      session.navLog.push(`Night open: ${night.title} · loop ${CORE_LOOP_VERSION}`);
+      const T = session.scoreTable || scoreTable(night);
+      session.navLog.push(`Night open: ${night.title} · ${CORE_LOOP_VERSION}`);
       session.navLog.push(
-        `Score: story +${SCORE.STORY_PIN} · drift +${SCORE.DRIFT_MYSTERY} · chapter +${SCORE.CHAPTER_MYSTERY}`
+        `Chapter scores: story +${T.STORY_PIN} · drift +${T.DRIFT_MYSTERY} · chapter +${T.CHAPTER_MYSTERY} · perfect +${T.PERFECT_BONUS}`
       );
       lowSpoonsWhispered = false;
       resumeState = State.FLIGHT;
@@ -588,7 +667,7 @@ export function startGame(ui) {
           kind: "drift",
         });
         setWhisper(
-          `✧ ${label.trim()} — saved · +${SCORE.DRIFT_MYSTERY} wonder · house pins updated.`
+          `✧ ${label.trim()} — saved · +${session.scoreTable.DRIFT_MYSTERY} wonder · house pins updated.`
         );
         session.mysteryNear = false;
         session.activeDriftId = null;
@@ -626,7 +705,7 @@ export function startGame(ui) {
         kind: "chapter",
       });
       setWhisper(
-        `✦ ${label.trim()} — chapter mystery · +${SCORE.CHAPTER_MYSTERY} wonder.`
+        `✦ ${label.trim()} — chapter mystery · +${session.scoreTable.CHAPTER_MYSTERY} wonder.`
       );
       setState(State.FLIGHT);
       refreshOverlays();
@@ -651,7 +730,9 @@ export function startGame(ui) {
     });
     if (session) recordFreePin(session);
     session?.navLog.push(`Pinned: ${pin.label}`);
-    setWhisper(`📌 ${pin.label} saved · +${SCORE.FREE_PIN} wonder.`);
+    setWhisper(
+      `📌 ${pin.label} saved · +${session?.scoreTable?.FREE_PIN ?? SCORE.FREE_PIN} wonder.`
+    );
     refreshOverlays();
     renderHousePins();
     renderMeters();
@@ -660,9 +741,11 @@ export function startGame(ui) {
   function beginCloseout() {
     if (!session || !night) return;
     session.endedAt = Date.now();
+    maybeApplyPerfectBonus(session, night);
     const best = saveBestScore(session.score);
+    const chBest = saveChapterBest(night.id, session.score);
     const lines = closeoutLines(session, night);
-    lines.push(`Best wonder (house): ${best}`);
+    lines.push(`Chapter best: ${chBest} · house best: ${best}`);
     session.navLog.push("--- closeout ---", ...lines);
     setState(State.CLOSEOUT);
     windshield.setMotionBlur?.(0);
@@ -671,6 +754,7 @@ export function startGame(ui) {
     if (el.navLog()) el.navLog().textContent = lines.join("\n");
     refreshOverlays();
     renderHousePins();
+    renderChapterMenu();
     renderMeters();
   }
 

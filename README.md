@@ -60,7 +60,7 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**Chapters v1.1** — four guided nights (Soft Rainy Hold, Gumdrop Summer, Clear Cold Glass, First Love Sky). MENU chapter picker, per-chapter scores + perfect bonus, unique sky moods. Core loop + pretty glass. Vanilla JS + Aladin.
+**Progress v1.2** — persistent completed chapters, chapter/house best scores, pin house (fly/delete/clear), wonder reflection at closeout. Four guided nights + core loop + pretty glass. Vanilla JS + Aladin. See `docs/PROGRESS.md`.
 
 ### Run locally
 

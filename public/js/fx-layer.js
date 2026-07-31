@@ -77,9 +77,62 @@ export function createFxLayer(canvas) {
   /** Shift ambient hue from view (ra/dec) — subtle, not disco */
   function setSkyFromView(view) {
     if (!view) return;
-    // map RA → hue drift, dec → cool/warm lean
-    skyHue = 200 + ((view.ra || 0) % 360) * (40 / 360);
-    if (view.dec < 0) skyHue += 8;
+    // map RA → hue drift, dec → cool/warm lean (biased by weather base)
+    const base = skyHue;
+    skyHue = base * 0.7 + (200 + ((view.ra || 0) % 360) * (40 / 360)) * 0.3;
+    if (view.dec < 0) skyHue += 4;
+  }
+
+  /**
+   * Chapter sky profile from night.sky / weather_mood.
+   * @param {{mood?,hue?,warmth?,starDensity?,cloudDensity?}|string} sky
+   */
+  function setWeather(sky) {
+    if (!sky) return;
+    if (typeof sky === "string") {
+      weatherMood = sky;
+      const presets = {
+        rain: { hue: 210, warmth: 0.1, starDensity: 0.9, cloudDensity: 1.6 },
+        warm: { hue: 28, warmth: 0.75, starDensity: 1.25, cloudDensity: 0.7 },
+        cold: { hue: 200, warmth: 0.05, starDensity: 1.4, cloudDensity: 0.35 },
+        rose: { hue: 320, warmth: 0.55, starDensity: 1.1, cloudDensity: 0.9 },
+      };
+      sky = presets[sky] || presets.rain;
+    }
+    weatherMood = sky.mood || weatherMood;
+    if (sky.hue != null) skyHue = sky.hue;
+    if (sky.warmth != null) skyWarmth = sky.warmth;
+    starDensity = sky.starDensity ?? 1;
+    cloudDensity = sky.cloudDensity ?? 1;
+    // reseed particle counts lightly
+    if (w > 0) {
+      const targetStars = Math.round(STAR_N * starDensity);
+      while (stars.length < targetStars) {
+        stars.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          z: 0.3 + Math.random() * 1.2,
+          r: 0.4 + Math.random() * 1.6,
+          a: 0.25 + Math.random() * 0.75,
+          tw: Math.random() * Math.PI * 2,
+          warm: weatherMood === "warm" || weatherMood === "rose" || Math.random() > 0.7,
+        });
+      }
+      if (stars.length > targetStars) stars.length = targetStars;
+      const targetClouds = Math.max(2, Math.round(CLOUD_N * cloudDensity));
+      while (clouds.length < targetClouds) {
+        clouds.push({
+          x: Math.random() * w,
+          y: h * (0.15 + Math.random() * 0.7),
+          s: 40 + Math.random() * 90,
+          a: 0.03 + Math.random() * 0.06,
+          v: 0.08 + Math.random() * 0.2,
+        });
+      }
+      if (clouds.length > targetClouds) clouds.length = targetClouds;
+    }
+    const stage = document.getElementById("sky-stage");
+    if (stage) stage.dataset.weather = weatherMood;
   }
 
   function tick(ts) {
@@ -95,23 +148,34 @@ export function createFxLayer(canvas) {
     // clear
     ctx.clearRect(0, 0, w, h);
 
-    // soft sky veil (color shift)
+    // soft sky veil (color shift by weather)
     const g = ctx.createRadialGradient(w * 0.5, h * 0.35, 0, w * 0.5, h * 0.5, h * 0.75);
-    const cool = `hsla(${skyHue}, 45%, 12%, 0.22)`;
-    const warm = `hsla(${35 + skyHue * 0.05}, 55%, 18%, ${0.12 + skyWarmth * 0.18})`;
+    const sat = weatherMood === "cold" ? 55 : weatherMood === "warm" ? 50 : 45;
+    const cool = `hsla(${skyHue}, ${sat}%, 12%, 0.22)`;
+    const warmHue =
+      weatherMood === "rose" ? 330 : weatherMood === "warm" ? 30 : 35 + skyHue * 0.05;
+    const warm = `hsla(${warmHue}, 55%, 18%, ${0.12 + skyWarmth * 0.2})`;
     g.addColorStop(0, warm);
     g.addColorStop(0.55, cool);
     g.addColorStop(1, "rgba(0,0,0,0.35)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // clouds (behind brighter stars feel)
+    // clouds (density varies by chapter)
+    const cloudTint =
+      weatherMood === "warm"
+        ? "255, 210, 170"
+        : weatherMood === "rose"
+          ? "230, 180, 210"
+          : weatherMood === "cold"
+            ? "160, 200, 240"
+            : "180, 200, 230";
     for (const c of clouds) {
       if (glide) c.x -= c.v * speed * dt * 8;
       if (c.x < -c.s * 2) c.x = w + c.s;
       const grd = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.s);
-      grd.addColorStop(0, `rgba(180, 200, 230, ${c.a * (glide ? 1.3 : 1)})`);
-      grd.addColorStop(1, "rgba(180, 200, 230, 0)");
+      grd.addColorStop(0, `rgba(${cloudTint}, ${c.a * (glide ? 1.3 : 1)})`);
+      grd.addColorStop(1, `rgba(${cloudTint}, 0)`);
       ctx.fillStyle = grd;
       ctx.beginPath();
       ctx.ellipse(c.x, c.y, c.s * 1.6, c.s * 0.55, 0, 0, Math.PI * 2);
@@ -185,5 +249,6 @@ export function createFxLayer(canvas) {
     setThrottle,
     setPhase,
     setSkyFromView,
+    setWeather,
   };
 }
