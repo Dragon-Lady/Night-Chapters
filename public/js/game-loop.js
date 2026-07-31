@@ -49,7 +49,6 @@ import {
   buildReflection,
   saveReflection,
   renderProgressSummary,
-  loadProgress,
 } from "./progress.js";
 
 export const CORE_LOOP_VERSION = "1.2.0";
@@ -98,6 +97,11 @@ export function startGame(ui) {
     chapters: () => document.getElementById("chapter-list"),
     pins: () => document.getElementById("pin-list"),
     housePins: () => document.getElementById("house-pins"),
+    progressSummary: () => document.getElementById("progress-summary"),
+    reflection: () => document.getElementById("reflection-screen"),
+    reflectionBody: () => document.getElementById("reflection-body"),
+    reflectionScore: () => document.getElementById("reflection-score"),
+    instruments: () => document.querySelector(".instruments"),
     navLog: () => document.getElementById("nav-log"),
     btnBegin: () => document.getElementById("btn-begin"),
     btnNext: () => document.getElementById("btn-next"),
@@ -105,6 +109,8 @@ export function startGame(ui) {
     btnRest: () => document.getElementById("btn-rest"),
     btnEnd: () => document.getElementById("btn-end"),
     btnPin: () => document.getElementById("btn-pin"),
+    btnReflectionDone: () => document.getElementById("btn-reflection-done"),
+    btnReflectionAgain: () => document.getElementById("btn-reflection-again"),
   };
 
   function setWhisper(text) {
@@ -176,12 +182,22 @@ export function startGame(ui) {
       onFly: (p) => {
         if (p.view) windshield.goto(p.view, { hard: true });
         setWhisper(`Flying to house pin: ${p.label}`);
+        // leave reflection if open
+        hideReflection();
       },
       onDelete: () => {
         refreshOverlays();
         setWhisper("House pin removed.");
       },
+      onClear: () => {
+        refreshOverlays();
+        setWhisper("House pins cleared. Progress kept.");
+      },
     });
+  }
+
+  function renderProgress() {
+    renderProgressSummary(el.progressSummary());
   }
 
   function renderChapterMenu() {
@@ -189,21 +205,57 @@ export function startGame(ui) {
     if (!root) return;
     const bests = loadChapterBests();
     root.innerHTML = "";
-    root.hidden = !(state === State.MENU || state === State.CLOSEOUT || state === State.BOOT);
+    root.hidden = !(
+      state === State.MENU ||
+      state === State.CLOSEOUT ||
+      state === State.BOOT
+    );
     for (const c of listNights()) {
       const card = document.createElement("button");
       card.type = "button";
       card.className = `chapter-card weather-${c.weather_mood || "rain"}`;
       if (c.id === selectedNightId) card.classList.add("selected");
+      const done = isChapterCompleted(c.id);
+      if (done) card.classList.add("completed");
       const best = bests[c.id] || 0;
       card.innerHTML = `
-        <span class="chapter-title">${escapeHtml(c.title)}</span>
+        <span class="chapter-title">${done ? "✓ " : ""}${escapeHtml(c.title)}</span>
         <span class="chapter-blurb">${escapeHtml(c.blurb || c.tone || "")}</span>
-        <span class="chapter-meta">best ${best} · ${escapeHtml(c.weather_mood || "")}</span>
+        <span class="chapter-meta">${done ? "flown · " : ""}best ${best} · ${escapeHtml(c.weather_mood || "")}</span>
       `;
       card.addEventListener("click", () => selectChapter(c.id));
       root.appendChild(card);
     }
+  }
+
+  function showReflection(reflection) {
+    const screen = el.reflection();
+    const body = el.reflectionBody();
+    const scoreEl = el.reflectionScore();
+    if (!screen || !body) return;
+    body.innerHTML = reflection.lines
+      .map((line) => {
+        const html = escapeHtml(line).replace(
+          /\*\*(.+?)\*\*/g,
+          "<strong>$1</strong>"
+        );
+        return `<p class="reflection-line">${html}</p>`;
+      })
+      .join("");
+    if (scoreEl) {
+      scoreEl.textContent = String(reflection.score);
+    }
+    screen.hidden = false;
+    screen.setAttribute("aria-hidden", "false");
+    document.body.classList.add("reflection-open");
+  }
+
+  function hideReflection() {
+    const screen = el.reflection();
+    if (!screen) return;
+    screen.hidden = true;
+    screen.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("reflection-open");
   }
 
   function escapeHtml(s) {
@@ -538,6 +590,7 @@ export function startGame(ui) {
       refreshOverlays();
       renderHousePins();
       renderChapterMenu();
+      renderProgress();
       if (el.btnBegin()) el.btnBegin().disabled = false;
       renderMeters();
     });
@@ -664,6 +717,7 @@ export function startGame(ui) {
           view: m.seed,
           emotion: "wonder",
           nightId: night.id,
+          chapterTitle: night.title,
           kind: "drift",
         });
         setWhisper(
@@ -702,6 +756,7 @@ export function startGame(ui) {
         view: night.mystery.seed || view,
         emotion: "wonder",
         nightId: night.id,
+        chapterTitle: night.title,
         kind: "chapter",
       });
       setWhisper(
@@ -726,6 +781,7 @@ export function startGame(ui) {
       label: label.trim(),
       view,
       nightId: night?.id,
+      chapterTitle: night?.title,
       kind: "personal",
     });
     if (session) recordFreePin(session);
@@ -742,30 +798,64 @@ export function startGame(ui) {
     if (!session || !night) return;
     session.endedAt = Date.now();
     maybeApplyPerfectBonus(session, night);
+
+    const disc =
+      (session.discovered.storyPins?.length || 0) +
+      (session.discovered.driftMysteries?.length || 0) +
+      (session.discovered.chapterMystery ? 1 : 0) +
+      (session.discovered.freePins || 0);
+
     const best = saveBestScore(session.score);
     const chBest = saveChapterBest(night.id, session.score);
+    recordChapterComplete({
+      nightId: night.id,
+      title: night.title,
+      score: session.score,
+      discoveries: disc,
+      perfect: !!session.perfectBonusApplied,
+    });
+
+    const reflection = buildReflection(session, night);
+    saveReflection(reflection);
+
     const lines = closeoutLines(session, night);
     lines.push(`Chapter best: ${chBest} · house best: ${best}`);
     session.navLog.push("--- closeout ---", ...lines);
+
     setState(State.CLOSEOUT);
     windshield.setMotionBlur?.(0);
     windshield.fx?.setThrottle(0);
-    setWhisper(lines.join(" · "));
+    setWhisper("Wonder reflection — the night settles.");
     if (el.navLog()) el.navLog().textContent = lines.join("\n");
     refreshOverlays();
     renderHousePins();
     renderChapterMenu();
+    renderProgress();
     renderMeters();
+    showReflection(reflection);
   }
 
   // —— UI bindings ——
   el.btnBegin()?.addEventListener("click", () => {
-    if (state === State.CLOSEOUT || state === State.MENU) beginFlight();
+    if (state === State.CLOSEOUT || state === State.MENU) {
+      hideReflection();
+      beginFlight();
+    }
   });
   el.btnNext()?.addEventListener("click", nextHeading);
   el.btnSkip()?.addEventListener("click", skipFix);
   el.btnRest()?.addEventListener("click", rest);
   el.btnEnd()?.addEventListener("click", beginCloseout);
+  el.btnReflectionDone()?.addEventListener("click", () => {
+    hideReflection();
+    setWhisper("Ready when you are — pick a night or Begin again.");
+    renderChapterMenu();
+    renderProgress();
+  });
+  el.btnReflectionAgain()?.addEventListener("click", () => {
+    hideReflection();
+    beginFlight();
+  });
   el.btnPin()?.addEventListener("click", () => {
     if (
       state === State.MYSTERY ||

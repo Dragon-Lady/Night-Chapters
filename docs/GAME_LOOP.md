@@ -38,7 +38,7 @@ BOOT → MENU → FLIGHT ⇄ ARRIVE
 | **ARRIVE** | Docked on story pin | Beat · **Next** / **Skip** / Rest |
 | **MYSTERY** | Near drift or chapter glow | **P** claim (optional) · keep gliding |
 | **REST** | Throttle forced ~0 | Spoons recover · throttle/Space to resume |
-| **CLOSEOUT** | Score + nav log | Begin again |
+| **CLOSEOUT** | Score + **wonder reflection** overlay | Back to nights / Fly again |
 
 ---
 
