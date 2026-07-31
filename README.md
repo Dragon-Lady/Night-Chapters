@@ -60,7 +60,7 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**v0.2** — Aladin windshield, Soft Rainy Hold, **FLIGHT/MYSTERY expanded**: drift mysteries during glide, spoon fuel drain/recover, pin overlays + house pin panel, wonder score from discoveries.
+**v0.3** — Pretty flight glass: star/cloud particles, smooth eased glide, sky color veil, glowing pins, light motion blur — still vanilla JS + Aladin. FLIGHT/MYSTERY + spoons + wonder score.
 
 ### Run locally
 

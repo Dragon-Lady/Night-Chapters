@@ -83,6 +83,7 @@ export function startGame(ui) {
     const chip = el.state();
     if (chip) chip.textContent = next;
     document.body.dataset.phase = next;
+    windshield.setPhase?.(next);
     syncButtons();
   }
 

@@ -13,8 +13,11 @@ function main() {
   }
 
   startGame({
-    onGlide() {
-      /* reserved for future companion crumbs */
+    onGlide(step) {
+      // FX already driven from windshield; hook kept for companions later
+      if (step?.speed > 0.5) {
+        document.getElementById("sky-stage")?.classList.add("is-gliding");
+      }
     },
   });
 }

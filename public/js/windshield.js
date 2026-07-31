@@ -1,7 +1,9 @@
 /**
  * Windshield — Aladin Lite as the cockpit glass.
- * Real sky spine + soft pin/mystery catalog overlays.
+ * Smooth glide easing, glowing pin catalogs, sky mood hooks for FX layer.
  */
+
+import { createFxLayer } from "./fx-layer.js";
 
 const BOOT = {
   ra: 83.8221,
@@ -10,12 +12,20 @@ const BOOT = {
   survey: "P/DSS2/color",
 };
 
-export function createWindshield(containerSelector = "#aladin-lite-div") {
+export function createWindshield(
+  containerSelector = "#aladin-lite-div",
+  { fxCanvasId = "fx-canvas" } = {}
+) {
   let aladin = null;
   let ready = false;
   const waiters = [];
   let pinCatalog = null;
   let mysteryCatalog = null;
+  let fx = null;
+
+  // Smoothed camera state (lerp target for prettier motion)
+  let cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
+  let lastGlideSpeed = 0;
 
   function whenReady(fn) {
     if (ready && aladin) fn(aladin);
@@ -28,6 +38,9 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
       return null;
     }
     if (aladin) return aladin;
+
+    const stage = document.getElementById("sky-stage");
+    if (stage) stage.classList.add("glass-boot");
 
     aladin = A.aladin(containerSelector, {
       survey: BOOT.survey,
@@ -56,24 +69,28 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
       console.warn("windshield boot nudge", e);
     }
 
-    // Soft catalogs — personal / story pins + mystery glows
+    cam = { ...BOOT };
+
+    // Glowing catalogs — larger soft markers
     try {
       if (typeof A.catalog === "function") {
         pinCatalog = A.catalog({
-          name: "Personal & story pins",
-          sourceSize: 18,
-          color: "#9ec9ff",
+          name: "Story & house pins",
+          sourceSize: 26,
+          color: "#7eb6ff",
           displayLabel: true,
-          labelColor: "#c8d0e0",
-          labelFont: "11px sans-serif",
+          labelColor: "#dce8ff",
+          labelFont: "12px sans-serif",
+          shape: "circle",
         });
         mysteryCatalog = A.catalog({
           name: "Mystery glows",
-          sourceSize: 22,
-          color: "#e8d5a3",
+          sourceSize: 32,
+          color: "#ffd78a",
           displayLabel: true,
-          labelColor: "#e8d5a3",
+          labelColor: "#ffe9b8",
           labelFont: "12px sans-serif",
+          shape: "plus",
         });
         aladin.addCatalog(pinCatalog);
         aladin.addCatalog(mysteryCatalog);
@@ -82,16 +99,31 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
       console.warn("catalog init", e);
     }
 
+    // FX layer (stars / clouds / veil)
+    const fxEl = document.getElementById(fxCanvasId);
+    if (fxEl) {
+      fx = createFxLayer(fxEl);
+      fx.start();
+    }
+
+    // CSS glass polish
+    const aladinDiv = document.querySelector(containerSelector);
+    if (aladinDiv) aladinDiv.classList.add("aladin-glass");
+    if (stage) {
+      stage.classList.remove("glass-boot");
+      stage.classList.add("glass-live");
+    }
+
     ready = true;
     while (waiters.length) waiters.shift()(aladin);
     return aladin;
   }
 
   function getView() {
-    if (!aladin) return { ...BOOT };
-    let ra = BOOT.ra;
-    let dec = BOOT.dec;
-    let fov = BOOT.fov;
+    if (!aladin) return { ...cam };
+    let ra = cam.ra;
+    let dec = cam.dec;
+    let fov = cam.fov;
     try {
       if (typeof aladin.getRaDec === "function") {
         const rd = aladin.getRaDec();
@@ -110,55 +142,108 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
     } catch {
       /* keep last */
     }
-    return { ra: Number(ra), dec: Number(dec), fov: Number(fov) };
+    cam = { ra: Number(ra), dec: Number(dec), fov: Number(fov) };
+    return { ...cam };
   }
 
-  function goto(view, { hard = false } = {}) {
-    if (!aladin || !view) return;
+  function applyCam() {
+    if (!aladin) return;
     try {
-      if (hard && typeof aladin.gotoRaDec === "function") {
-        aladin.gotoRaDec(view.ra, view.dec);
+      if (typeof aladin.gotoRaDec === "function") {
+        aladin.gotoRaDec(cam.ra, cam.dec);
       }
-      if (view.fov != null && typeof aladin.setFov === "function" && hard) {
-        aladin.setFov(view.fov);
+      if (typeof aladin.setFov === "function") {
+        aladin.setFov(cam.fov);
       }
-    } catch (e) {
-      console.warn("goto", e);
+    } catch {
+      /* soft */
     }
   }
 
+  function goto(view, { hard = false } = {}) {
+    if (!view) return;
+    if (hard) {
+      cam.ra = view.ra;
+      cam.dec = view.dec;
+      if (view.fov != null) cam.fov = view.fov;
+      applyCam();
+      setMotionBlur(0);
+      fx?.setSkyFromView(cam);
+      return;
+    }
+    // soft goto: single eased step used by callers over frames
+    glideStep(view, 0.5);
+  }
+
+  /**
+   * Smooth eased glide toward target (ease-out cubic blend).
+   * @returns {{ ra, dec, fov, distDeg, speed }}
+   */
   function glideStep(target, throttle = 0.35) {
     const cur = getView();
-    if (!aladin || !target) return { ...cur, distDeg: 0 };
+    if (!aladin || !target) {
+      return { ...cur, distDeg: 0, speed: 0 };
+    }
 
     const t = Math.max(0, Math.min(1, throttle));
-    const maxStep = 0.08 + t * 0.55;
+    // Ease: higher responsiveness mid-throttle, softer near target
     const dRa = wrapDeltaRa(target.ra - cur.ra);
     const dDec = target.dec - cur.dec;
-    const dist = Math.hypot(dRa * Math.cos((cur.dec * Math.PI) / 180), dDec);
+    const cos = Math.cos((cur.dec * Math.PI) / 180);
+    const dist = Math.hypot(dRa * cos, dDec);
+
+    // ease-out factor: approach slows near pin (prettier dock)
+    const approach = dist < 2 ? 0.35 + dist * 0.2 : 1;
+    const maxStep = (0.06 + t * 0.48) * approach;
 
     let nRa = cur.ra;
     let nDec = cur.dec;
     if (dist > 1e-5) {
-      const step = Math.min(maxStep, dist);
-      const u = step / dist;
-      nRa = cur.ra + dRa * u;
-      nDec = cur.dec + dDec * u;
+      const step = Math.min(maxStep, dist * (0.12 + t * 0.22));
+      const u = Math.min(1, step / dist);
+      // smoothstep blend
+      const s = u * u * (3 - 2 * u);
+      nRa = cur.ra + dRa * s;
+      nDec = cur.dec + dDec * s;
       nRa = ((nRa % 360) + 360) % 360;
       nDec = Math.max(-90, Math.min(90, nDec));
     }
 
     const tFov = target.fov ?? cur.fov;
-    const nFov = cur.fov + (tFov - cur.fov) * (0.04 + t * 0.08);
+    const nFov = cur.fov + (tFov - cur.fov) * (0.05 + t * 0.1);
 
-    try {
-      if (typeof aladin.gotoRaDec === "function") aladin.gotoRaDec(nRa, nDec);
-      if (typeof aladin.setFov === "function") aladin.setFov(nFov);
-    } catch {
-      /* soft fail */
+    cam = { ra: nRa, dec: nDec, fov: nFov };
+    applyCam();
+
+    const speed = dist > 0.01 ? Math.min(1, maxStep / 0.5) * t : 0;
+    lastGlideSpeed = speed * 0.7 + lastGlideSpeed * 0.3;
+    setMotionBlur(lastGlideSpeed);
+    fx?.setThrottle(t);
+    fx?.setSkyFromView(cam);
+
+    return { ra: nRa, dec: nDec, fov: nFov, distDeg: dist, speed: lastGlideSpeed };
+  }
+
+  function setMotionBlur(amount) {
+    const stage = document.getElementById("sky-stage");
+    const glass = document.querySelector(".aladin-glass");
+    if (!stage) return;
+    const a = Math.max(0, Math.min(1, amount));
+    stage.style.setProperty("--glide", String(a));
+    stage.classList.toggle("is-gliding", a > 0.12);
+    if (glass) {
+      // subtle CSS blur + scale for motion feel (lightweight)
+      const blur = (a * 0.55).toFixed(2);
+      const scale = (1 + a * 0.012).toFixed(4);
+      glass.style.filter = a > 0.08 ? `blur(${blur}px) brightness(1.05)` : "";
+      glass.style.transform = a > 0.08 ? `scale(${scale})` : "";
     }
+  }
 
-    return { ra: nRa, dec: nDec, fov: nFov, distDeg: dist };
+  function setPhase(phase) {
+    fx?.setPhase(phase);
+    const stage = document.getElementById("sky-stage");
+    if (stage) stage.dataset.phase = phase || "";
   }
 
   function wrapDeltaRa(d) {
@@ -174,11 +259,6 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
     return null;
   }
 
-  /**
-   * Refresh sky markers from story/personal/mystery source lists.
-   * @param {{ra,dec,name,kind}[]} sources
-   * @param {{ra,dec,name}[]} personal
-   */
   function setOverlays(sources = [], personal = []) {
     if (!aladin || !pinCatalog) return;
     try {
@@ -191,7 +271,11 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
       const mystSrc = [];
 
       for (const s of sources) {
-        const src = makeSource(s.ra, s.dec, s.name || "");
+        const label =
+          s.kind === "story" || s.kind === undefined
+            ? `✦ ${s.name || ""}`
+            : s.name || "";
+        const src = makeSource(s.ra, s.dec, label);
         if (!src) continue;
         if (s.kind === "drift" || s.kind === "chapter" || s.kind === "claimed") {
           mystSrc.push(src);
@@ -217,6 +301,14 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
           mystSrc.forEach((s) => mysteryCatalog.addSources([s]));
         }
       }
+
+      // pulse stage when pins refresh
+      const stage = document.getElementById("sky-stage");
+      if (stage) {
+        stage.classList.remove("pins-pulse");
+        void stage.offsetWidth;
+        stage.classList.add("pins-pulse");
+      }
     } catch (e) {
       console.warn("setOverlays", e);
     }
@@ -229,6 +321,11 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
     goto,
     glideStep,
     setOverlays,
+    setPhase,
+    setMotionBlur,
+    get fx() {
+      return fx;
+    },
     get aladin() {
       return aladin;
     },
