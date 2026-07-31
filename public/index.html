@@ -44,19 +44,29 @@
         <h2>Soft instruments</h2>
         <div class="meters">
           <div>Heading bug: <strong id="heading-bug">—</strong></div>
-          <div>Fuel of the night: <strong id="fuel">—</strong></div>
+          <div>
+            Spoons:
+            <strong id="fuel">—</strong>
+            <div class="fuel-track" aria-hidden="true">
+              <div id="fuel-bar" class="fuel-bar"></div>
+            </div>
+          </div>
+          <div>Wonder score: <strong id="score">0</strong></div>
+          <div>Pins discovered: <strong id="discovered">0</strong></div>
         </div>
         <h2 style="margin-top: 0.75rem">Story ribbon</h2>
         <ul id="pin-list" class="pin-list"></ul>
+        <h2 style="margin-top: 0.75rem">House pins</h2>
+        <div id="house-pins" class="house-pins"></div>
         <h2 style="margin-top: 0.75rem">Nav log</h2>
         <pre id="nav-log" class="nav-log">Nav log empty — soft start.</pre>
       </div>
     </section>
 
     <p class="footer-note">
-      Windshield: Aladin Lite (CDS) · Personal pins in localStorage ·
-      <kbd>P</kbd> pin/claim · <kbd>Space</kbd> rest · Not a military sim ·
-      Wonder-first
+      Windshield: Aladin Lite (CDS) · Spoons drain on glide, recover on rest ·
+      ✧ drift mysteries during flight · <kbd>P</kbd> pin/claim ·
+      <kbd>Space</kbd> rest · Wonder score from discoveries · Not a military sim
     </p>
 
     <!-- Aladin Lite v3 — real-sky spine (same family as Dragon Lady Observatory) -->

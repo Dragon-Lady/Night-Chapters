@@ -1,10 +1,9 @@
 /**
  * Windshield — Aladin Lite as the cockpit glass.
- * Real sky spine. Free glide. No military overlay.
+ * Real sky spine + soft pin/mystery catalog overlays.
  */
 
 const BOOT = {
-  // M42 region — comfort default for Night Chapters
   ra: 83.8221,
   dec: -5.3911,
   fov: 3.5,
@@ -15,6 +14,8 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
   let aladin = null;
   let ready = false;
   const waiters = [];
+  let pinCatalog = null;
+  let mysteryCatalog = null;
 
   function whenReady(fn) {
     if (ready && aladin) fn(aladin);
@@ -44,7 +45,6 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
       fullScreen: false,
     });
 
-    // Prefer explicit goto after construct (Observatory pattern)
     try {
       if (typeof aladin.gotoRaDec === "function") {
         aladin.gotoRaDec(BOOT.ra, BOOT.dec);
@@ -54,6 +54,32 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
       }
     } catch (e) {
       console.warn("windshield boot nudge", e);
+    }
+
+    // Soft catalogs — personal / story pins + mystery glows
+    try {
+      if (typeof A.catalog === "function") {
+        pinCatalog = A.catalog({
+          name: "Personal & story pins",
+          sourceSize: 18,
+          color: "#9ec9ff",
+          displayLabel: true,
+          labelColor: "#c8d0e0",
+          labelFont: "11px sans-serif",
+        });
+        mysteryCatalog = A.catalog({
+          name: "Mystery glows",
+          sourceSize: 22,
+          color: "#e8d5a3",
+          displayLabel: true,
+          labelColor: "#e8d5a3",
+          labelFont: "12px sans-serif",
+        });
+        aladin.addCatalog(pinCatalog);
+        aladin.addCatalog(mysteryCatalog);
+      }
+    } catch (e) {
+      console.warn("catalog init", e);
     }
 
     ready = true;
@@ -101,16 +127,11 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
     }
   }
 
-  /**
-   * Soft step toward target view (one frame of glide).
-   * @returns {{ ra, dec, fov, distDeg }}
-   */
   function glideStep(target, throttle = 0.35) {
     const cur = getView();
     if (!aladin || !target) return { ...cur, distDeg: 0 };
 
     const t = Math.max(0, Math.min(1, throttle));
-    // Max degrees of sky per frame at full throttle (gentle)
     const maxStep = 0.08 + t * 0.55;
     const dRa = wrapDeltaRa(target.ra - cur.ra);
     const dDec = target.dec - cur.dec;
@@ -147,12 +168,67 @@ export function createWindshield(containerSelector = "#aladin-lite-div") {
     return x;
   }
 
+  function makeSource(ra, dec, name) {
+    if (typeof A.source === "function") return A.source(ra, dec, { name });
+    if (typeof A.marker === "function") return A.marker(ra, dec, { popupTitle: name });
+    return null;
+  }
+
+  /**
+   * Refresh sky markers from story/personal/mystery source lists.
+   * @param {{ra,dec,name,kind}[]} sources
+   * @param {{ra,dec,name}[]} personal
+   */
+  function setOverlays(sources = [], personal = []) {
+    if (!aladin || !pinCatalog) return;
+    try {
+      if (typeof pinCatalog.removeAll === "function") pinCatalog.removeAll();
+      if (mysteryCatalog && typeof mysteryCatalog.removeAll === "function") {
+        mysteryCatalog.removeAll();
+      }
+
+      const pinSrc = [];
+      const mystSrc = [];
+
+      for (const s of sources) {
+        const src = makeSource(s.ra, s.dec, s.name || "");
+        if (!src) continue;
+        if (s.kind === "drift" || s.kind === "chapter" || s.kind === "claimed") {
+          mystSrc.push(src);
+        } else {
+          pinSrc.push(src);
+        }
+      }
+      for (const p of personal) {
+        if (p.view == null && p.ra == null) continue;
+        const ra = p.view?.ra ?? p.ra;
+        const dec = p.view?.dec ?? p.dec;
+        const src = makeSource(ra, dec, `📌 ${p.label || "pin"}`);
+        if (src) pinSrc.push(src);
+      }
+
+      if (typeof pinCatalog.addSources === "function") pinCatalog.addSources(pinSrc);
+      else pinSrc.forEach((s) => pinCatalog.addSources([s]));
+
+      if (mysteryCatalog) {
+        if (typeof mysteryCatalog.addSources === "function") {
+          mysteryCatalog.addSources(mystSrc);
+        } else {
+          mystSrc.forEach((s) => mysteryCatalog.addSources([s]));
+        }
+      }
+    } catch (e) {
+      console.warn("setOverlays", e);
+    }
+  }
+
   return {
     boot,
     whenReady,
     getView,
     goto,
     glideStep,
+    setOverlays,
     get aladin() {
       return aladin;
     },

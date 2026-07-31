@@ -238,6 +238,118 @@ label.throttle {
   color: var(--glow);
 }
 
+.pin-list li.drift {
+  border-style: dashed;
+  color: var(--glow);
+}
+
+.fuel-track {
+  margin-top: 0.25rem;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  max-width: 180px;
+}
+
+.fuel-bar {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6a8caf, var(--signal));
+  transition: width 0.15s linear;
+}
+
+.fuel-bar[data-level="mid"] {
+  background: linear-gradient(90deg, #a89060, var(--glow));
+}
+
+.fuel-bar[data-level="low"] {
+  background: linear-gradient(90deg, #8a5a5a, #d4a0a0);
+}
+
+.house-pins {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.house-pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.house-pin.kind-drift,
+.house-pin.kind-chapter {
+  border-color: rgba(232, 213, 163, 0.35);
+}
+
+.house-pin-fly {
+  border: none;
+  background: transparent;
+  color: var(--signal);
+  padding: 0;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.house-pin-fly:hover {
+  color: #fff;
+}
+
+.house-pin-meta {
+  color: var(--mist-dim);
+  flex: 1;
+}
+
+.house-pin-del {
+  border: none;
+  background: transparent;
+  color: var(--mist-dim);
+  padding: 0 0.25rem;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.house-pin-del:hover {
+  color: #f0b0b0;
+}
+
+.pin-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--mist-dim);
+}
+
+body[data-phase="MYSTERY"] .reticle::after {
+  border-color: rgba(232, 213, 163, 0.85);
+  box-shadow: 0 0 20px rgba(232, 213, 163, 0.35);
+  animation: pulse-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
 .nav-log {
   margin: 0;
   font-size: 0.78rem;

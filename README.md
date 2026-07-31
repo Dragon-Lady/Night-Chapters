@@ -60,7 +60,7 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**v0 playable shell** — Aladin windshield, Soft Rainy Hold night, soft glide loop, personal pins (localStorage).
+**v0.2** — Aladin windshield, Soft Rainy Hold, **FLIGHT/MYSTERY expanded**: drift mysteries during glide, spoon fuel drain/recover, pin overlays + house pin panel, wonder score from discoveries.
 
 ### Run locally
 

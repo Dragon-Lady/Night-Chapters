@@ -10,7 +10,7 @@ const BUILTIN = {
   status: "ready",
   weather_mood: "soft rainy hold",
   whisper_start:
-    "We start from known light. Glide only as fast as you want to see.",
+    "We start from known light. Glide soft. Watch for ✧ drift glows off the ribbon.",
   pins: [
     {
       id: "home-glass",
@@ -40,10 +40,24 @@ const BUILTIN = {
       view: { ra: 210.8023, dec: 54.3489, fov: 1.5, name: "M51" },
     },
   ],
+  drift_mysteries: [
+    {
+      id: "drift-between-1-2",
+      story_hook:
+        "A pale spark off the path between comfort and the day you left…",
+      seed: { ra: 180.0, dec: 20.0, fov: 2.0 },
+    },
+    {
+      id: "drift-between-2-3",
+      story_hook:
+        "Something quiet near the personal star’s approach — not on the ribbon, not a test.",
+      seed: { ra: 245.0, dec: 46.0, fov: 1.8 },
+    },
+  ],
   mystery: {
     id: "mystery-glow",
     story_hook:
-      "Something unlabeled off the ribbon. Get close. Press P — name it yours.",
+      "Chapter glow unlabeled. Get close. Press P — name it yours.",
     seed: { ra: 41.9672, dec: 21.3918, fov: 1.2 },
     claimed_label: null,
   },
