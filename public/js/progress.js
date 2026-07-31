@@ -171,6 +171,12 @@ export function loadReflections() {
   }
 }
 
+// re-export keys for docs / export tooling
+export const STORAGE = {
+  PROGRESS_KEY,
+  REFLECTIONS_KEY,
+};
+
 /** Render progress summary strip */
 export function renderProgressSummary(container) {
   if (!container) return;

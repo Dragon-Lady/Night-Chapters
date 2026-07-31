@@ -51,8 +51,17 @@ import {
   renderProgressSummary,
 } from "./progress.js";
 import { createAudio } from "./audio.js";
+import {
+  exportPinsFile,
+  exportReflectionsFile,
+  exportFullHouseFile,
+  shareSoftSummary,
+  copyToClipboard,
+  toJson,
+  buildExportPayload,
+} from "./export.js";
 
-export const CORE_LOOP_VERSION = "1.3.0";
+export const CORE_LOOP_VERSION = "1.4.0";
 
 const State = {
   BOOT: "BOOT",
@@ -73,6 +82,7 @@ const ACTIVE = new Set([
 
 export function startGame(ui) {
   const windshield = createWindshield("#aladin-lite-div");
+  const audio = createAudio();
   let night = null;
   let session = null;
   let selectedNightId = "soft-rainy-hold";
@@ -83,6 +93,7 @@ export function startGame(ui) {
   let sitTimer = null;
   let lastTs = 0;
   let lowSpoonsWhispered = false;
+  let mysteryHumAt = 0;
 
   const el = {
     whisper: () => document.getElementById("whisper"),
@@ -112,7 +123,30 @@ export function startGame(ui) {
     btnPin: () => document.getElementById("btn-pin"),
     btnReflectionDone: () => document.getElementById("btn-reflection-done"),
     btnReflectionAgain: () => document.getElementById("btn-reflection-again"),
+    btnMute: () => document.getElementById("btn-mute"),
+    btnHelp: () => document.getElementById("btn-help"),
+    btnExport: () => document.getElementById("btn-export"),
+    helpScreen: () => document.getElementById("help-screen"),
+    exportScreen: () => document.getElementById("export-screen"),
+    btnHelpClose: () => document.getElementById("btn-help-close"),
+    btnExportClose: () => document.getElementById("btn-export-close"),
+    btnExportPins: () => document.getElementById("btn-export-pins"),
+    btnExportReflections: () => document.getElementById("btn-export-reflections"),
+    btnExportFull: () => document.getElementById("btn-export-full"),
+    btnExportCopy: () => document.getElementById("btn-export-copy"),
+    btnExportShare: () => document.getElementById("btn-export-share"),
   };
+
+  function syncMuteButton() {
+    const b = el.btnMute();
+    if (!b) return;
+    b.textContent = audio.muted ? "🔇 Sound off" : "🔊 Sound on";
+    b.setAttribute("aria-pressed", audio.muted ? "true" : "false");
+  }
+
+  function chapterMood() {
+    return night?.sky?.mood || night?.weather_mood || "rain";
+  }
 
   function setWhisper(text) {
     const w = el.whisper();
@@ -120,6 +154,7 @@ export function startGame(ui) {
   }
 
   function setState(next) {
+    const prev = state;
     state = next;
     const chip = el.state();
     if (chip) chip.textContent = next;
@@ -132,6 +167,23 @@ export function startGame(ui) {
         next === State.CLOSEOUT ||
         next === State.BOOT
       );
+    }
+    // Audio phase cues
+    if (next === State.REST && prev !== State.REST) {
+      audio.enterRestSilence();
+    } else if (prev === State.REST && next !== State.REST) {
+      audio.leaveRestSilence();
+    }
+    if (next === State.MYSTERY && prev !== State.MYSTERY) {
+      const now = performance.now();
+      if (now - mysteryHumAt > 2500) {
+        audio.mysteryHum();
+        mysteryHumAt = now;
+      }
+    }
+    if (next === State.CLOSEOUT || next === State.MENU) {
+      audio.setWind(0);
+      if (next === State.MENU) audio.stopAmbient({ fade: 1.5 });
     }
     syncButtons();
   }
@@ -259,6 +311,40 @@ export function startGame(ui) {
     document.body.classList.remove("reflection-open");
   }
 
+  function showHelp(show = true) {
+    const screen = el.helpScreen();
+    if (!screen) return;
+    screen.hidden = !show;
+    screen.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  function showExport(show = true) {
+    const screen = el.exportScreen();
+    if (!screen) return;
+    screen.hidden = !show;
+    screen.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  function nudgeThrottle(delta) {
+    if (!session || !el.throttle()) return;
+    const cur = Number(el.throttle().value || 0);
+    const next = Math.max(0, Math.min(1, cur + delta));
+    el.throttle().value = String(next);
+    setThrottle(session, next);
+    if (state === State.REST && next > 0.04) leaveRestIfNeeded();
+    audio.setWind(session.resting ? 0 : next);
+  }
+
+  function selectChapterByIndex(i) {
+    const nights = listNights();
+    if (!nights[i]) return;
+    if (state !== State.MENU && state !== State.CLOSEOUT && state !== State.BOOT) {
+      setWhisper("Pick chapters from the menu after closeout.");
+      return;
+    }
+    selectChapter(nights[i].id);
+  }
+
   function escapeHtml(s) {
     return String(s)
       .replace(/&/g, "&amp;")
@@ -271,6 +357,8 @@ export function startGame(ui) {
     selectedNightId = id;
     night = await loadNight(id);
     windshield.applyChapterSky?.(night);
+    audio.setChapterMood(chapterMood());
+    audio.uiTap();
     const first = night.pins?.[0]?.view;
     if (first && windshield.ready) windshield.goto(first, { hard: true });
     refreshOverlays();
@@ -400,6 +488,7 @@ export function startGame(ui) {
     if (el.throttle()) el.throttle().value = "0";
     windshield.setMotionBlur?.(0);
     windshield.fx?.setThrottle(0);
+    audio.setWind(0);
     setState(State.REST);
     if (reason === "empty") {
       setWhisper(
@@ -499,6 +588,7 @@ export function startGame(ui) {
 
       const step = windshield.glideStep(wp.view, session.throttle);
       windshield.fx?.setThrottle(session.throttle);
+      audio.setWind(session.throttle);
       if (typeof ui?.onGlide === "function") ui.onGlide(step, wp);
 
       // —— Drift mysteries appear during glide ——
@@ -548,6 +638,7 @@ export function startGame(ui) {
       }
     } else if (state === State.FLIGHT || state === State.MYSTERY) {
       windshield.fx?.setThrottle(session?.throttle || 0);
+      audio.setWind(session.resting ? 0 : session?.throttle || 0);
       if (session.resting) windshield.setMotionBlur?.(0);
     }
 
@@ -558,6 +649,8 @@ export function startGame(ui) {
     setState(State.ARRIVE);
     setWhisper(`${wp.pin.label} — ${wp.pin.note}`);
     markArrived(session, wp);
+    audio.pinChime();
+    audio.setWind(0);
     windshield.setMotionBlur?.(0);
     windshield.fx?.setThrottle(0);
     refreshOverlays();
@@ -592,6 +685,7 @@ export function startGame(ui) {
       renderHousePins();
       renderChapterMenu();
       renderProgress();
+      syncMuteButton();
       if (el.btnBegin()) el.btnBegin().disabled = false;
       renderMeters();
     });
@@ -601,9 +695,12 @@ export function startGame(ui) {
   }
 
   function beginFlight() {
-    loadNight(selectedNightId).then((n) => {
+    loadNight(selectedNightId).then(async (n) => {
       night = n;
       windshield.applyChapterSky?.(night);
+      await audio.unlock();
+      audio.setChapterMood(chapterMood());
+      audio.startAmbient(chapterMood());
       session = createFlightSession(night);
       session.startedAt = Date.now();
       const T = session.scoreTable || scoreTable(night);
@@ -826,6 +923,8 @@ export function startGame(ui) {
     setState(State.CLOSEOUT);
     windshield.setMotionBlur?.(0);
     windshield.fx?.setThrottle(0);
+    audio.setWind(0);
+    audio.stopAmbient({ fade: 2 });
     setWhisper("Wonder reflection — the night settles.");
     if (el.navLog()) el.navLog().textContent = lines.join("\n");
     refreshOverlays();
@@ -837,9 +936,50 @@ export function startGame(ui) {
   }
 
   // —— UI bindings ——
+  el.btnMute()?.addEventListener("click", async () => {
+    await audio.unlock();
+    audio.toggleMute();
+    syncMuteButton();
+    setWhisper(audio.muted ? "Sound off — silence is fine." : "Sound on — soft ambient.");
+  });
+  el.btnHelp()?.addEventListener("click", () => showHelp(true));
+  el.btnHelpClose()?.addEventListener("click", () => showHelp(false));
+  el.btnExport()?.addEventListener("click", () => showExport(true));
+  el.btnExportClose()?.addEventListener("click", () => showExport(false));
+  el.btnExportPins()?.addEventListener("click", () => {
+    exportPinsFile();
+    setWhisper("House pins downloaded as JSON.");
+    showExport(false);
+  });
+  el.btnExportReflections()?.addEventListener("click", () => {
+    exportReflectionsFile();
+    setWhisper("Reflections downloaded as JSON.");
+    showExport(false);
+  });
+  el.btnExportFull()?.addEventListener("click", () => {
+    exportFullHouseFile();
+    setWhisper("Full house backup downloaded.");
+    showExport(false);
+  });
+  el.btnExportCopy()?.addEventListener("click", async () => {
+    const ok = await copyToClipboard(toJson(buildExportPayload()));
+    setWhisper(ok ? "House JSON copied to clipboard." : "Copy failed — try download.");
+  });
+  el.btnExportShare()?.addEventListener("click", async () => {
+    const r = await shareSoftSummary();
+    setWhisper(
+      r === "shared"
+        ? "Shared a soft summary."
+        : r === "copied"
+          ? "Summary copied (share not available)."
+          : "Share failed."
+    );
+  });
   el.btnBegin()?.addEventListener("click", () => {
     if (state === State.CLOSEOUT || state === State.MENU) {
       hideReflection();
+      showHelp(false);
+      showExport(false);
       beginFlight();
     }
   });
@@ -879,8 +1019,78 @@ export function startGame(ui) {
   });
 
   window.addEventListener("keydown", (e) => {
-    if (e.key === "p" || e.key === "P") {
-      if (e.target.matches?.("input, textarea")) return;
+    if (e.target.matches?.("input, textarea, select")) return;
+    const k = e.key;
+
+    // Help / export overlays
+    if (k === "?" || k === "h" || k === "H") {
+      e.preventDefault();
+      const open = el.helpScreen() && !el.helpScreen().hidden;
+      showHelp(!open);
+      showExport(false);
+      return;
+    }
+    if (k === "e" || k === "E") {
+      e.preventDefault();
+      const open = el.exportScreen() && !el.exportScreen().hidden;
+      showExport(!open);
+      showHelp(false);
+      return;
+    }
+    if (k === "Escape") {
+      e.preventDefault();
+      showHelp(false);
+      showExport(false);
+      if (document.body.classList.contains("reflection-open")) {
+        hideReflection();
+      }
+      return;
+    }
+
+    if (k === "m" || k === "M") {
+      e.preventDefault();
+      audio.unlock().then(() => {
+        audio.toggleMute();
+        syncMuteButton();
+        setWhisper(audio.muted ? "Sound off." : "Sound on.");
+      });
+      return;
+    }
+
+    // Chapter pick 1–4
+    if (k >= "1" && k <= "4") {
+      e.preventDefault();
+      selectChapterByIndex(Number(k) - 1);
+      return;
+    }
+
+    if (k === "b" || k === "B" || k === "Enter") {
+      if (state === State.MENU || state === State.CLOSEOUT) {
+        e.preventDefault();
+        hideReflection();
+        beginFlight();
+      }
+      return;
+    }
+
+    if (k === "n" || k === "N") {
+      e.preventDefault();
+      nextHeading();
+      return;
+    }
+    if (k === "s" || k === "S") {
+      e.preventDefault();
+      skipFix();
+      return;
+    }
+    if (k === "c" || k === "C") {
+      e.preventDefault();
+      if (session && state !== State.MENU && state !== State.BOOT) {
+        beginCloseout();
+      }
+      return;
+    }
+    if (k === "p" || k === "P") {
       e.preventDefault();
       if (
         state === State.MYSTERY ||
@@ -889,11 +1099,22 @@ export function startGame(ui) {
       ) {
         tryClaimMystery();
       } else freePin();
+      return;
     }
-    if (e.key === " " || e.code === "Space") {
-      if (e.target.matches?.("input, textarea")) return;
+    if (k === " " || e.code === "Space") {
       e.preventDefault();
       rest();
+      return;
+    }
+    if (k === "ArrowUp") {
+      e.preventDefault();
+      nudgeThrottle(0.08);
+      return;
+    }
+    if (k === "ArrowDown") {
+      e.preventDefault();
+      nudgeThrottle(-0.08);
+      return;
     }
   });
 

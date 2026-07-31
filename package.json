@@ -5,7 +5,9 @@
   "description": "Gentle night flight through a personal sky. I want to see. I play.",
   "scripts": {
     "start": "npx --yes serve public -l 4343",
-    "serve": "npx --yes serve public -l 4343"
+    "serve": "npx --yes serve public -l 4343",
+    "deploy:preview": "npx --yes netlify-cli deploy --dir=public",
+    "deploy:prod": "npx --yes netlify-cli deploy --prod --dir=public"
   },
   "keywords": [
     "observatory",

@@ -6,19 +6,116 @@
 
 Not a military sim. Not a tracker. A soft aviation daydream on an observatory glass: you glide between **story pins**, discover **mystery** objects, and let the sky tell the chapter.
 
+**Live repo:** [github.com/Dragon-Lady/Night-Chapters](https://github.com/Dragon-Lady/Night-Chapters)
+
+---
+
+## Play instructions
+
+### Run locally
+
+```bash
+cd night-chapters          # clone path, e.g. ~/Projects/night-chapters
+npm start
+# → http://localhost:4343
+```
+
+### How to fly
+
+1. Wait for the **Aladin** sky glass.  
+2. **Choose a night** (or press `1`–`4`).  
+3. **Begin night** (`Enter` / `B`) — soft ambient starts.  
+4. Raise **throttle** (`↑`/`↓`) — glass glides toward the heading bug; **spoons** drain.  
+5. **`Space`** — rest; spoons recover; silence.  
+6. On a story pin — read the whisper · **`N`** next · **`S`** skip (allowed).  
+7. Near **✧** drift or **✦** chapter mystery — **`P`** to name it (saved to house pins + score).  
+8. **`C`** closeout → **wonder reflection** · Back to nights or Fly again.  
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| `?` / `H` | Help |
+| `E` | Export / share |
+| `M` | Mute |
+| `1`–`4` | Select chapter (menu) |
+| `Enter` / `B` | Begin night |
+| `↑` / `↓` | Throttle |
+| `N` | Next heading |
+| `S` | Skip fix |
+| `Space` | Rest |
+| `P` | Pin / claim |
+| `C` | Closeout |
+| `Esc` | Close overlays |
+
+### Export & share
+
+- **Export** (header or `E`): download pins JSON, reflections JSON, full house backup, copy JSON, or share a short text summary.  
+- Data is **local only** (this browser). Use export for backup/move.
+
+### Chapters
+
+| Night | Mood |
+|-------|------|
+| Soft Rainy Hold | rain |
+| Gumdrop Summer | warm |
+| Clear Cold Glass | cold |
+| First Love Sky | rose |
+
+---
+
+## Deploy (Netlify)
+
+Publish folder is **`public/`** (see `netlify.toml`).
+
+1. Connect the GitHub repo in Netlify.  
+2. **Publish directory:** `public`  
+3. **Build command:** none required.  
+4. Deploy → `https://<your-site>.netlify.app`
+
+CLI:
+
+```bash
+netlify deploy --prod --dir=public
+```
+
+Full notes: [`docs/DEPLOY.md`](./docs/DEPLOY.md)
+
 ---
 
 ## Working feel
 
 | It is | It isn’t |
 |-------|----------|
-| Light aviation *metaphor* — heading, soft bank, glide | Weapons, IFF, dogfight, kill-chain |
-| Story pins as waypoints of meaning | Mission targets / threat rings |
-| Mystery as *oh* at the reticle | T1 alerts |
-| Bedtime glass cockpit | Full sim punishment model |
-| Personal / private layers | Public scoreboard of who flew best |
+| Light aviation *metaphor* | Weapons, dogfight, kill-chain |
+| Story pins as meaning | Mission targets |
+| Mystery as *oh* | Threat alerts |
+| Bedtime glass cockpit | Full sim punishment |
+| Personal / private layers | Competitive leaderboard |
 
-**Tone:** low light, rain optional, dogs allowed on the seat. Speed is glide, not afterburner. Failure is soft: drift, re-center, try another heading.
+---
+
+## Stack
+
+- Vanilla JS (ES modules)  
+- [Aladin Lite](https://aladin.cds.unistra.fr/) CDN windshield  
+- Web Audio ambients (no sample files)  
+- localStorage progress / pins / reflections  
+
+Docs: [`VISION`](./docs/VISION.md) · [`GAME_LOOP`](./docs/GAME_LOOP.md) · [`PROGRESS`](./docs/PROGRESS.md) · [`AUDIO`](./docs/AUDIO.md) · [`DEPLOY`](./docs/DEPLOY.md)
+
+---
+
+## Layout
+
+```
+public/           # deployed site root
+  index.html
+  css/  js/  data/nights/
+docs/             # design + deploy notes
+schema/           # entities + hooks
+netlify.toml
+```
 
 ---
 
@@ -26,81 +123,12 @@ Not a military sim. Not a tracker. A soft aviation daydream on an observatory gl
 
 | Project | Role |
 |---------|------|
-| **Dragon Eye** | Military / aviation *tracking* |
-| **Dragon Lady’s Observatory** | Wonder-first free-glide + personal pins (Aladin spine) |
-| **Night Chapters** | Same soul — **chapter = flight plan of feeling** |
-
-Born from cottage weekend build schemas (Observatory sequel track) and the Night Chapters design brief: story arcs as playable sky, with a gentle flight layer on top.
-
----
-
-## Core loop
-
-```
-Pick a Night → Glide → Arrive pin → Tiny beat → Next heading
-                ↘ Mystery claim (name it yours)
-                ↘ Rest / leave anytime
-End → Optional postcard · personal pin · soft closeout
-```
-
----
-
-## Mechanics (high level)
-
-1. **Glide camera** — the craft *is* attention; throttle is how fast the sky drifts; “rest” almost parks you.  
-2. **Story pins** — nav fixes with a heart (place, label, emotion, one tiny beat).  
-3. **Chapter ribbon** — constellation path between pins, not an airway chart.  
-4. **Mystery reticle** — one unlabeled glow per night; **pin / name** is the win.  
-5. **Soft instruments** — optional: altitude of attention (FOV depth), fuel of the night (spoons/time), nav log for closeout.  
-6. **Companion** (optional) — quiet right-seat crumbs; mute always; never ATC drill.
-
-See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities and hooks.
-
----
-
-## Status
-
-**Audio v1.3** — Web Audio ambients per chapter (rain / warm / cold / rose), pin chimes, mystery hum, throttle wind, rest silence, mute. Plus progress, pin house, four nights, core loop, pretty glass. Vanilla JS + Aladin. See `docs/AUDIO.md` · `docs/PROGRESS.md`.
-
-### Run locally
-
-```bash
-cd ~/Projects/night-chapters   # or your clone
-npm start
-# → http://localhost:4343
-```
-
-Or serve `public/` with any static server.
-
-### Play (gentle) — core loop
-
-1. Wait for the sky glass (Aladin).  
-2. **Begin night** — Soft Rainy Hold.  
-3. **Throttle** — glide toward heading bug (spoons drain).  
-4. **`Space` / Rest** — spoons recover; throttle again to resume.  
-5. On story pin: whisper · **Next** or **Skip** (allowed).  
-6. **✧ Drift glows** mid-path · **P** to name (score + house pin).  
-7. **✦ Chapter mystery** after ribbon · **P** to claim.  
-8. **Closeout** — discoveries + wonder score · best saved.
-
-### Layout
-
-```
-public/           # playable static app
-  index.html
-  css/night.css
-  js/             # game-loop, windshield, flight, pins, nights
-  data/nights/    # chapter JSON
-data/nights/      # same chapters (repo source copy)
-docs/             # VISION, GAME_LOOP, example night
-schema/           # entities + hooks
-```
-
-Cottage continuity (private): `~/cottage/` · Observatory: Dragon-Lady-Observatory.  
-This repo is the **Night Chapters** public home.
+| **Dragon Eye** | Military / aviation tracking |
+| **Dragon Lady’s Observatory** | Wonder-first free-glide + personal pins |
+| **Night Chapters** | Chapter = flight plan of feeling |
 
 ---
 
 ## License
 
-TBD by owner. All rights reserved until stated otherwise.
+All rights reserved until an open license is chosen (see `LICENSE`).

@@ -47,15 +47,35 @@ header.cockpit-top {
   z-index: 5;
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem 1.25rem;
-  padding: 0.75rem 1rem 0.35rem;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+  padding: 0.65rem 0.85rem 0.35rem;
 }
 
-.mute-btn {
+.header-brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.85rem;
+  min-width: 0;
+}
+
+.header-actions {
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.header-btn,
+.mute-btn {
   font-size: 0.72rem;
   padding: 0.3rem 0.7rem;
+}
+
+.state-chip {
+  font-variant-numeric: tabular-nums;
 }
 
 header h1 {
@@ -238,8 +258,20 @@ header .tagline {
   z-index: 5;
   display: grid;
   gap: 0.65rem;
-  padding: 0.75rem 1rem 1rem;
+  padding: 0.65rem 0.75rem 1rem;
   background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.4));
+}
+
+.panel-subhead {
+  margin-top: 0.75rem !important;
+}
+
+.controls-row {
+  margin-top: 0.65rem;
+}
+
+.controls-row button {
+  min-height: 2rem;
 }
 
 .panel {
@@ -725,6 +757,132 @@ kbd {
 
 @media (min-width: 900px) {
   .instruments {
-    grid-template-columns: 1.4fr 1fr;
+    grid-template-columns: 1.35fr 1fr;
   }
+}
+
+@media (max-width: 720px) {
+  header.cockpit-top {
+    padding: 0.5rem 0.65rem 0.25rem;
+  }
+
+  header h1 {
+    font-size: 0.95rem;
+  }
+
+  #sky-stage {
+    margin: 0 0.4rem;
+    min-height: 42dvh;
+    border-radius: 0.75rem;
+  }
+
+  #aladin-lite-div,
+  .aladin-glass {
+    min-height: 280px;
+  }
+
+  .instruments {
+    padding: 0.5rem 0.5rem 0.85rem;
+  }
+
+  .panel {
+    padding: 0.65rem 0.7rem;
+  }
+
+  .chapter-list {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .controls-row {
+    gap: 0.4rem;
+  }
+
+  .controls-row button {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.7rem;
+  }
+
+  .house-pins {
+    max-height: 160px;
+  }
+
+  .footer-note {
+    padding: 0 0.65rem 0.75rem;
+    font-size: 0.65rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .chapter-list {
+    grid-template-columns: 1fr;
+  }
+
+  .header-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+}
+
+/* Modals (help / export) */
+.modal-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(3, 5, 12, 0.75);
+  backdrop-filter: blur(8px);
+}
+
+.modal-screen[hidden] {
+  display: none !important;
+}
+
+.modal-card {
+  width: min(440px, 100%);
+  max-height: min(85dvh, 640px);
+  overflow: auto;
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.15rem 1.25rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.modal-card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  color: var(--glow);
+}
+
+.modal-note {
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  color: var(--mist-dim);
+  line-height: 1.4;
+}
+
+.shortcut-list {
+  margin: 0 0 0.85rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--mist);
+  line-height: 1.65;
+}
+
+.shortcut-list kbd {
+  margin-right: 0.15rem;
+}
+
+.export-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.export-actions button {
+  width: 100%;
+  text-align: left;
 }

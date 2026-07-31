@@ -2,26 +2,53 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Night Chapters — I want to see. I play.</title>
     <meta
       name="description"
-      content="Gentle night flight through a personal sky. Wonder-first. Personal pins as waypoints. Aladin windshield."
+      content="Gentle night flight through a personal sky. Wonder-first. Personal pins, soft ambients, Aladin windshield."
     />
+    <meta name="theme-color" content="#05060a" />
+    <meta property="og:title" content="Night Chapters" />
+    <meta
+      property="og:description"
+      content="I want to see. I play. Gentle night flight — not a military sim."
+    />
+    <meta property="og:type" content="website" />
     <link rel="stylesheet" href="./css/night.css" />
   </head>
   <body id="app">
     <header class="cockpit-top">
-      <h1>Night Chapters</h1>
-      <p class="tagline">I want to see. I play.</p>
-      <span id="state-chip" class="tagline">BOOT</span>
-      <button type="button" id="btn-mute" class="mute-btn" aria-pressed="false" title="Toggle soft sound">
-        🔊 Sound on
-      </button>
+      <div class="header-brand">
+        <h1>Night Chapters</h1>
+        <p class="tagline">I want to see. I play.</p>
+      </div>
+      <span id="state-chip" class="tagline state-chip">BOOT</span>
+      <div class="header-actions">
+        <button type="button" id="btn-help" class="header-btn" title="Keyboard shortcuts (?)">
+          ?
+        </button>
+        <button type="button" id="btn-export" class="header-btn" title="Export / share (E)">
+          Export
+        </button>
+        <button
+          type="button"
+          id="btn-mute"
+          class="mute-btn header-btn"
+          aria-pressed="false"
+          title="Toggle soft sound (M)"
+        >
+          🔊 Sound on
+        </button>
+      </div>
     </header>
 
     <div id="sky-stage">
-      <div id="aladin-lite-div" role="img" aria-label="Sky windshield — Aladin real-sky glass"></div>
+      <div
+        id="aladin-lite-div"
+        role="img"
+        aria-label="Sky windshield — Aladin real-sky glass"
+      ></div>
       <canvas id="fx-canvas" class="fx-canvas" aria-hidden="true"></canvas>
       <div class="sky-veil" aria-hidden="true"></div>
       <div class="reticle" aria-hidden="true"></div>
@@ -51,14 +78,80 @@
       </div>
     </div>
 
+    <!-- Keyboard help -->
+    <div
+      id="help-screen"
+      class="modal-screen"
+      hidden
+      aria-hidden="true"
+      role="dialog"
+      aria-labelledby="help-title"
+    >
+      <div class="modal-card">
+        <h2 id="help-title">Keyboard shortcuts</h2>
+        <ul class="shortcut-list">
+          <li><kbd>Enter</kbd> / <kbd>B</kbd> — Begin night</li>
+          <li><kbd>1</kbd>–<kbd>4</kbd> — Select chapter (menu)</li>
+          <li><kbd>↑</kbd> / <kbd>↓</kbd> — Throttle</li>
+          <li><kbd>N</kbd> — Next heading</li>
+          <li><kbd>S</kbd> — Skip fix</li>
+          <li><kbd>Space</kbd> — Rest / resume</li>
+          <li><kbd>P</kbd> — Pin / claim mystery</li>
+          <li><kbd>C</kbd> — Closeout</li>
+          <li><kbd>M</kbd> — Mute sound</li>
+          <li><kbd>E</kbd> — Export / share</li>
+          <li><kbd>?</kbd> / <kbd>H</kbd> — This help</li>
+          <li><kbd>Esc</kbd> — Close overlays</li>
+        </ul>
+        <p class="modal-note">Wonder-first. No combat keys. Skip and rest always allowed.</p>
+        <button type="button" class="primary" id="btn-help-close">Close</button>
+      </div>
+    </div>
+
+    <!-- Export / share -->
+    <div
+      id="export-screen"
+      class="modal-screen"
+      hidden
+      aria-hidden="true"
+      role="dialog"
+      aria-labelledby="export-title"
+    >
+      <div class="modal-card">
+        <h2 id="export-title">Export &amp; share</h2>
+        <p class="modal-note">
+          Your house stays on this device. Export JSON for backup, or share a short summary.
+        </p>
+        <div class="export-actions">
+          <button type="button" id="btn-export-pins">Download pins JSON</button>
+          <button type="button" id="btn-export-reflections">
+            Download reflections JSON
+          </button>
+          <button type="button" id="btn-export-full">Download full house</button>
+          <button type="button" id="btn-export-copy">Copy full JSON</button>
+          <button type="button" class="primary" id="btn-export-share">
+            Share soft summary
+          </button>
+        </div>
+        <button type="button" id="btn-export-close" style="margin-top: 0.75rem">
+          Close
+        </button>
+      </div>
+    </div>
+
     <section class="instruments" aria-label="Soft instruments">
-      <div class="panel">
+      <div class="panel panel-primary">
         <h2>Choose a night</h2>
         <div id="progress-summary" class="progress-summary"></div>
-        <div id="chapter-list" class="chapter-list" role="listbox" aria-label="Guided night chapters"></div>
-        <h2 style="margin-top: 0.75rem">Whisper</h2>
+        <div
+          id="chapter-list"
+          class="chapter-list"
+          role="listbox"
+          aria-label="Guided night chapters"
+        ></div>
+        <h2 class="panel-subhead">Whisper</h2>
         <p id="whisper" class="whisper">Warming the glass…</p>
-        <div class="row" style="margin-top: 0.65rem">
+        <div class="row controls-row">
           <button type="button" class="primary" id="btn-begin">Begin night</button>
           <button type="button" id="btn-next" disabled>Next heading</button>
           <button type="button" id="btn-skip" disabled>Skip fix</button>
@@ -66,13 +159,20 @@
           <button type="button" id="btn-pin" disabled title="P">Pin / Claim ✦</button>
           <button type="button" id="btn-end" disabled>Closeout</button>
         </div>
-        <label class="throttle" style="margin-top: 0.75rem">
+        <label class="throttle">
           Throttle (glide)
-          <input id="throttle" type="range" min="0" max="1" step="0.01" value="0.25" />
+          <input
+            id="throttle"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.25"
+          />
         </label>
       </div>
 
-      <div class="panel">
+      <div class="panel panel-secondary">
         <h2>Soft instruments</h2>
         <div class="meters">
           <div>Heading bug: <strong id="heading-bug">—</strong></div>
@@ -88,22 +188,21 @@
           <div>Best wonder: <strong id="best-score">0</strong></div>
           <div>Chapter best: <strong id="chapter-best">0</strong></div>
         </div>
-        <h2 style="margin-top: 0.75rem">Story ribbon</h2>
+        <h2 class="panel-subhead">Story ribbon</h2>
         <ul id="pin-list" class="pin-list"></ul>
-        <h2 style="margin-top: 0.75rem">House pins</h2>
+        <h2 class="panel-subhead">House pins</h2>
         <div id="house-pins" class="house-pins"></div>
-        <h2 style="margin-top: 0.75rem">Nav log</h2>
+        <h2 class="panel-subhead">Nav log</h2>
         <pre id="nav-log" class="nav-log">Nav log empty — soft start.</pre>
       </div>
     </section>
 
     <p class="footer-note">
-      Windshield: Aladin Lite (CDS) · Spoons drain on glide, recover on rest ·
-      ✧ drift mysteries during flight · <kbd>P</kbd> pin/claim ·
-      <kbd>Space</kbd> rest · Wonder score from discoveries · Not a military sim
+      <kbd>?</kbd> help · <kbd>E</kbd> export · <kbd>M</kbd> mute ·
+      <kbd>P</kbd> pin · <kbd>Space</kbd> rest · Aladin Lite (CDS) · Web Audio ·
+      Not a military sim
     </p>
 
-    <!-- Aladin Lite v3 — real-sky spine (same family as Dragon Lady Observatory) -->
     <script
       src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"
       charset="utf-8"
