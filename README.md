@@ -60,7 +60,7 @@ See [`docs/VISION.md`](./docs/VISION.md) and [`schema/`](./schema/) for entities
 
 ## Status
 
-**v0.3** — Pretty flight glass: star/cloud particles, smooth eased glide, sky color veil, glowing pins, light motion blur — still vanilla JS + Aladin. FLIGHT/MYSTERY + spoons + wonder score.
+**Core loop v1.0 complete** — FLIGHT (throttle glide) · REST (Space, spoon recover) · MYSTERY (drift + chapter, P to claim) · personal pins (localStorage + glass) · wonder score. Pretty glass FX. Vanilla JS + Aladin.
 
 ### Run locally
 
@@ -72,15 +72,16 @@ npm start
 
 Or serve `public/` with any static server.
 
-### Play (gentle)
+### Play (gentle) — core loop
 
 1. Wait for the sky glass (Aladin).  
 2. **Begin night** — Soft Rainy Hold.  
-3. Nudge **throttle**; glass glides toward the heading bug.  
-4. On arrive: read whisper · **Next heading** or **Skip fix** (allowed).  
-5. **Rest** / `Space` — no failure.  
-6. Near mystery: **P** or **Pin / Claim** to name it yours.  
-7. **Closeout** — nav log three-liner.
+3. **Throttle** — glide toward heading bug (spoons drain).  
+4. **`Space` / Rest** — spoons recover; throttle again to resume.  
+5. On story pin: whisper · **Next** or **Skip** (allowed).  
+6. **✧ Drift glows** mid-path · **P** to name (score + house pin).  
+7. **✦ Chapter mystery** after ribbon · **P** to claim.  
+8. **Closeout** — discoveries + wonder score · best saved.
 
 ### Layout
 

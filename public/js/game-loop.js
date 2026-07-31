@@ -1,9 +1,13 @@
 /**
- * Night Chapters game loop
- * BOOT → MENU → FLIGHT → ARRIVE | MYSTERY | REST → CLOSEOUT
+ * Night Chapters — core game loop (complete)
  *
- * FLIGHT: soft glide, spoon fuel, drift mysteries appear along the path.
- * MYSTERY: chapter or drift glow near reticle — claim with P.
+ * BOOT → MENU → FLIGHT ⇄ ARRIVE ⇄ MYSTERY ⇄ REST → CLOSEOUT → MENU
+ *
+ * FLIGHT: throttle glide toward heading bug; spoon fuel drains while moving.
+ * REST: Space / Rest button — throttle 0, spoons recover, no failure.
+ * MYSTERY: drift glows mid-path + chapter mystery; P claims → personal pin + score.
+ *
+ * Wonder-first. Vanilla JS. Not a military sim.
  */
 
 import { loadNight } from "./nights.js";
@@ -25,6 +29,7 @@ import {
   ARRIVE_DEG,
   MYSTERY_NEAR_DEG,
   MYSTERY_NOTICE_DEG,
+  SCORE,
 } from "./flight.js";
 import {
   claimPin,
@@ -34,20 +39,32 @@ import {
   loadBestScore,
 } from "./pins.js";
 
+export const CORE_LOOP_VERSION = "1.0.0";
+
 const State = {
   BOOT: "BOOT",
   MENU: "MENU",
   FLIGHT: "FLIGHT",
   ARRIVE: "ARRIVE",
   MYSTERY: "MYSTERY",
+  REST: "REST",
   CLOSEOUT: "CLOSEOUT",
 };
+
+const ACTIVE = new Set([
+  State.FLIGHT,
+  State.ARRIVE,
+  State.MYSTERY,
+  State.REST,
+]);
 
 export function startGame(ui) {
   const windshield = createWindshield("#aladin-lite-div");
   let night = null;
   let session = null;
   let state = State.BOOT;
+  /** State to return to when leaving REST */
+  let resumeState = State.FLIGHT;
   let raf = 0;
   let sitTimer = null;
   let lastTs = 0;
@@ -62,6 +79,7 @@ export function startGame(ui) {
     fuelBar: () => document.getElementById("fuel-bar"),
     score: () => document.getElementById("score"),
     discovered: () => document.getElementById("discovered"),
+    best: () => document.getElementById("best-score"),
     pins: () => document.getElementById("pin-list"),
     housePins: () => document.getElementById("house-pins"),
     navLog: () => document.getElementById("nav-log"),
@@ -87,29 +105,46 @@ export function startGame(ui) {
     syncButtons();
   }
 
-  function syncButtons() {
-    const flying =
+  function inFlightLike() {
+    return (
       state === State.FLIGHT ||
       state === State.ARRIVE ||
-      state === State.MYSTERY;
+      state === State.MYSTERY ||
+      state === State.REST
+    );
+  }
+
+  function syncButtons() {
+    const flying = inFlightLike();
     if (el.btnBegin()) {
       el.btnBegin().disabled = !(
         state === State.MENU || state === State.CLOSEOUT
       );
     }
-    if (el.btnNext()) el.btnNext().disabled = !flying;
-    if (el.btnSkip())
-      el.btnSkip().disabled =
-        state !== State.ARRIVE && state !== State.FLIGHT;
+    if (el.btnNext()) {
+      el.btnNext().disabled = !(
+        state === State.FLIGHT ||
+        state === State.ARRIVE ||
+        state === State.MYSTERY ||
+        state === State.REST
+      );
+    }
+    if (el.btnSkip()) {
+      el.btnSkip().disabled = !(
+        state === State.ARRIVE || state === State.FLIGHT
+      );
+    }
     if (el.btnRest()) el.btnRest().disabled = !flying;
-    if (el.btnEnd()) el.btnEnd().disabled = state === State.BOOT;
+    if (el.btnEnd()) el.btnEnd().disabled = state === State.BOOT || state === State.MENU;
     if (el.btnPin()) el.btnPin().disabled = state === State.BOOT;
   }
 
   function refreshOverlays() {
     if (!night || !windshield.ready) return;
-    const sources = catalogSourcesForNight(night, session);
-    windshield.setOverlays(sources, loadPersonalPins());
+    windshield.setOverlays(
+      catalogSourcesForNight(night, session),
+      loadPersonalPins()
+    );
   }
 
   function renderHousePins() {
@@ -136,10 +171,12 @@ export function startGame(ui) {
       if (
         session &&
         i === session.pinIndex &&
-        state !== State.CLOSEOUT
+        state !== State.CLOSEOUT &&
+        !session.fixesVisited.includes(p.id)
       ) {
         li.classList.add("current");
       }
+      // after markArrived, pinIndex already advanced — highlight last arrived briefly via done
       ul.appendChild(li);
     });
     for (const m of session?.driftMysteries || []) {
@@ -147,7 +184,9 @@ export function startGame(ui) {
       li.classList.add("drift");
       li.textContent = m.claimed
         ? `✧ ${m.claimed_label || "found"}`
-        : "✧ drift ?";
+        : m.noticed
+          ? "✧ drift glow"
+          : "✧ ?";
       if (m.claimed) li.classList.add("done");
       if (session?.activeDriftId === m.id) li.classList.add("current");
       ul.appendChild(li);
@@ -187,7 +226,7 @@ export function startGame(ui) {
       const f = fuelOfNight(session);
       if (el.fuel()) {
         el.fuel().textContent = `${Math.round(f * 100)}% spoons${
-          session.resting ? " · resting" : ""
+          state === State.REST || session.resting ? " · resting" : ""
         }`;
       }
       if (el.fuelBar()) {
@@ -195,9 +234,7 @@ export function startGame(ui) {
         el.fuelBar().dataset.level =
           f < 0.2 ? "low" : f < 0.5 ? "mid" : "ok";
       }
-      if (el.score()) {
-        el.score().textContent = String(session.score);
-      }
+      if (el.score()) el.score().textContent = String(session.score);
       if (el.discovered()) {
         el.discovered().textContent = String(discoveryCount(session));
       }
@@ -206,36 +243,115 @@ export function startGame(ui) {
           session.navLog.slice(-6).join("\n") ||
           "Nav log empty — soft start.";
       }
+    } else if (el.score()) {
+      el.score().textContent = "0";
     }
+    if (el.best()) el.best().textContent = String(loadBestScore());
     renderPins();
   }
 
+  // ——— REST ———
+  function enterRest({ reason = "manual" } = {}) {
+    if (!session || !ACTIVE.has(state) && state !== State.REST) {
+      if (!session || state === State.CLOSEOUT || state === State.MENU) return;
+    }
+    if (state !== State.REST) {
+      resumeState =
+        state === State.REST
+          ? resumeState
+          : state === State.BOOT || state === State.MENU
+            ? State.FLIGHT
+            : state;
+    }
+    setThrottle(session, 0);
+    if (el.throttle()) el.throttle().value = "0";
+    windshield.setMotionBlur?.(0);
+    windshield.fx?.setThrottle(0);
+    setState(State.REST);
+    if (reason === "empty") {
+      setWhisper(
+        "Spoons empty — rest in the glass. No failure. Recovery is the play."
+      );
+    } else {
+      setWhisper("Rest. Spoons recover. Space or throttle to fly again.");
+    }
+  }
+
+  function leaveRestIfNeeded() {
+    if (state !== State.REST || !session) return;
+    if (session.spoons <= 0.02) return;
+    if (session.throttle > 0.04) {
+      const next =
+        resumeState === State.REST || resumeState === State.CLOSEOUT
+          ? State.FLIGHT
+          : resumeState;
+      setState(next);
+      setWhisper(
+        next === State.MYSTERY
+          ? "Back to the glow…"
+          : "Glide resumes. Soft sky ahead."
+      );
+    }
+  }
+
+  // ——— rAF tick ———
   function tick(ts) {
     raf = requestAnimationFrame(tick);
     const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 1 / 60;
     lastTs = ts;
 
     if (!session || !night || !windshield.ready) return;
-
-    // Spoon fuel always ticks during an open night
-    if (state !== State.MENU && state !== State.BOOT && state !== State.CLOSEOUT) {
-      const before = session.spoons;
-      tickSpoons(session, dt);
-      if (session.spoons <= 0.02 && before > 0.02) {
-        if (el.throttle()) el.throttle().value = "0";
-        setWhisper("Spoons empty — rest in the glass. No failure. Recovery is the play.");
-        lowSpoonsWhispered = true;
-      } else if (session.spoons < 0.25 && !session.resting && !lowSpoonsWhispered) {
-        setWhisper("Spoons running low — Rest or Space to recover.");
-        lowSpoonsWhispered = true;
-      } else if (session.spoons > 0.4) {
-        lowSpoonsWhispered = false;
-      }
-      if (session.resting && el.throttle() && Number(el.throttle().value) > 0.04) {
-        el.throttle().value = String(session.throttle);
-      }
+    if (!ACTIVE.has(state)) {
+      renderMeters();
+      return;
     }
 
+    // Spoon fuel: drain on glide, recover on rest
+    const before = session.spoons;
+    tickSpoons(session, dt);
+
+    if (session.spoons <= 0.02 && before > 0.02) {
+      if (el.throttle()) el.throttle().value = "0";
+      enterRest({ reason: "empty" });
+      lowSpoonsWhispered = true;
+    } else if (
+      session.spoons < 0.25 &&
+      !session.resting &&
+      state !== State.REST &&
+      !lowSpoonsWhispered
+    ) {
+      setWhisper("Spoons running low — Rest or Space to recover.");
+      lowSpoonsWhispered = true;
+    } else if (session.spoons > 0.4) {
+      lowSpoonsWhispered = false;
+    }
+
+    // Keep slider synced when auto-rest clamps throttle
+    if (
+      (session.resting || state === State.REST) &&
+      el.throttle() &&
+      Number(el.throttle().value) > 0.04
+    ) {
+      el.throttle().value = String(session.throttle);
+    }
+
+    // REST: no glide, spoons recover (already in tickSpoons)
+    if (state === State.REST) {
+      windshield.fx?.setThrottle(0);
+      leaveRestIfNeeded();
+      renderMeters();
+      return;
+    }
+
+    // ARRIVE: parked on pin beat — no auto glide until Next
+    if (state === State.ARRIVE) {
+      windshield.fx?.setThrottle(0);
+      windshield.setMotionBlur?.(0);
+      renderMeters();
+      return;
+    }
+
+    // FLIGHT + MYSTERY: throttle glide when not resting
     if (
       (state === State.FLIGHT || state === State.MYSTERY) &&
       !session.resting &&
@@ -247,49 +363,61 @@ export function startGame(ui) {
         beginCloseout();
         return;
       }
+
       const step = windshield.glideStep(wp.view, session.throttle);
       windshield.fx?.setThrottle(session.throttle);
       if (typeof ui?.onGlide === "function") ui.onGlide(step, wp);
 
-      // Drift mysteries appear during glide (not only at chapter end)
+      // —— Drift mysteries appear during glide ——
       const view = { ra: step.ra, dec: step.dec };
       const near = nearestDriftMystery(session, view);
       if (near && near.distDeg < MYSTERY_NOTICE_DEG) {
         if (!near.mystery.noticed) {
           near.mystery.noticed = true;
-          session.navLog.push(`Noticed drift glow…`);
+          session.navLog.push("Noticed drift glow…");
           refreshOverlays();
         }
         if (near.distDeg < MYSTERY_NEAR_DEG) {
           session.activeDriftId = near.mystery.id;
-          if (state !== State.MYSTERY || session.mysteryNear !== true) {
+          session.mysteryNear = true;
+          if (state !== State.MYSTERY) {
             setState(State.MYSTERY);
             setWhisper(
               `${near.mystery.story_hook} · Press P to name it (or keep gliding).`
             );
           }
-          session.mysteryNear = true;
         }
-      } else if (session.activeDriftId && state === State.MYSTERY) {
-        // left drift field but might still be on chapter mystery
+      } else if (
+        session.activeDriftId &&
+        state === State.MYSTERY &&
+        wp.kind !== "mystery"
+      ) {
+        // left drift field; return to flight unless chapter mystery
         session.activeDriftId = null;
+        session.mysteryNear = false;
+        setState(State.FLIGHT);
       }
 
-      // Chapter mystery approach
+      // —— Chapter mystery approach ——
       if (wp.kind === "mystery" && step.distDeg < MYSTERY_NEAR_DEG) {
         session.mysteryNear = true;
         if (state !== State.MYSTERY) {
           setState(State.MYSTERY);
-          setWhisper(night.mystery.story_hook);
+          setWhisper(
+            `${night.mystery.story_hook} · Press P to claim · or glide closer.`
+          );
         }
       }
 
+      // —— Story pin arrival ——
       if (step.distDeg < ARRIVE_DEG && wp.kind === "pin") {
         onArrivePin(wp);
       }
+    } else if (state === State.FLIGHT || state === State.MYSTERY) {
+      windshield.fx?.setThrottle(session?.throttle || 0);
+      if (session.resting) windshield.setMotionBlur?.(0);
     }
 
-    // While resting in MYSTERY, still allow claim; no forced exit
     renderMeters();
   }
 
@@ -297,6 +425,8 @@ export function startGame(ui) {
     setState(State.ARRIVE);
     setWhisper(`${wp.pin.label} — ${wp.pin.note}`);
     markArrived(session, wp);
+    windshield.setMotionBlur?.(0);
+    windshield.fx?.setThrottle(0);
     refreshOverlays();
     if (wp.pin.beat === "sit") {
       clearTimeout(sitTimer);
@@ -322,7 +452,7 @@ export function startGame(ui) {
     windshield.whenReady(() => {
       setState(State.MENU);
       setWhisper(
-        `${night.title}. ${night.whisper_start || "I want to see. I play."} Best wonder: ${loadBestScore()}.`
+        `${night.title}. ${night.whisper_start || "I want to see. I play."} Best wonder: ${loadBestScore()}. Core loop ${CORE_LOOP_VERSION}.`
       );
       refreshOverlays();
       renderHousePins();
@@ -335,19 +465,25 @@ export function startGame(ui) {
   }
 
   function beginFlight() {
-    if (!night) return;
-    // reload night data so claimed flags reset for a fresh flight
     loadNight("soft-rainy-hold").then((n) => {
       night = n;
       session = createFlightSession(night);
       session.startedAt = Date.now();
-      session.navLog.push(`Night open: ${night.title}`);
+      session.navLog.push(`Night open: ${night.title} · loop ${CORE_LOOP_VERSION}`);
+      session.navLog.push(
+        `Score: story +${SCORE.STORY_PIN} · drift +${SCORE.DRIFT_MYSTERY} · chapter +${SCORE.CHAPTER_MYSTERY}`
+      );
       lowSpoonsWhispered = false;
-      setThrottle(session, Number(el.throttle()?.value || 0.25));
+      resumeState = State.FLIGHT;
+      const t0 = Number(el.throttle()?.value || 0.25);
+      setThrottle(session, t0);
       const first = night.pins[0]?.view;
       if (first) windshield.goto(first, { hard: true });
       setState(State.FLIGHT);
-      setWhisper(night.whisper_start || "Glide when ready. Watch for ✧ glows.");
+      setWhisper(
+        night.whisper_start ||
+          "Glide when ready. Throttle to fly · Space to rest · watch for ✧ glows."
+      );
       refreshOverlays();
       renderHousePins();
       renderMeters();
@@ -356,10 +492,24 @@ export function startGame(ui) {
 
   function nextHeading() {
     if (!session || !night) return;
-    if (state === State.ARRIVE || state === State.MYSTERY) {
-      setState(State.FLIGHT);
+    if (state === State.REST) {
+      if (session.spoons <= 0.02) {
+        setWhisper("Still recovering spoons — wait a moment.");
+        return;
+      }
+      if (session.throttle < 0.1) {
+        setThrottle(session, 0.3);
+        if (el.throttle()) el.throttle().value = "0.3";
+      }
+    }
+    if (
+      state === State.ARRIVE ||
+      state === State.MYSTERY ||
+      state === State.REST
+    ) {
       session.activeDriftId = null;
       session.mysteryNear = false;
+      setState(State.FLIGHT);
     }
     const wp = currentWaypoint(night, session);
     if (!wp) {
@@ -393,18 +543,25 @@ export function startGame(ui) {
 
   function rest() {
     if (!session) return;
-    setThrottle(session, 0);
-    if (el.throttle()) el.throttle().value = "0";
-    windshield.setMotionBlur?.(0);
-    windshield.fx?.setThrottle(0);
-    setWhisper("Rest. Spoons recover. No failure.");
+    if (state === State.REST) {
+      // toggle: leave rest if spoons allow
+      if (session.spoons > 0.05) {
+        setThrottle(session, 0.25);
+        if (el.throttle()) el.throttle().value = "0.25";
+        leaveRestIfNeeded();
+      }
+      return;
+    }
+    if (ACTIVE.has(state) || state === State.FLIGHT) {
+      enterRest({ reason: "manual" });
+    }
   }
 
   function tryClaimMystery() {
     if (!session || !night) return;
     const view = windshield.getView();
 
-    // Prefer active drift mystery if near
+    // Active drift mystery
     if (session.activeDriftId) {
       const m = session.driftMysteries.find(
         (x) => x.id === session.activeDriftId
@@ -425,10 +582,12 @@ export function startGame(ui) {
           nightId: night.id,
           kind: "drift",
         });
-        setWhisper(`✧ ${label.trim()} — saved to house pins (+score).`);
-        setState(State.FLIGHT);
+        setWhisper(
+          `✧ ${label.trim()} — saved · +${SCORE.DRIFT_MYSTERY} wonder · house pins updated.`
+        );
         session.mysteryNear = false;
         session.activeDriftId = null;
+        setState(State.FLIGHT);
         refreshOverlays();
         renderHousePins();
         renderMeters();
@@ -438,10 +597,15 @@ export function startGame(ui) {
 
     // Chapter mystery
     const wp = currentWaypoint(night, session);
-    if (wp?.kind === "mystery" || session.mysteryNear) {
+    if (
+      wp?.kind === "mystery" ||
+      (session.mysteryNear && session.pinIndex >= night.pins.length)
+    ) {
       const label =
-        window.prompt("Name this chapter mystery (yours alone):", "soft rainy glow") ||
-        "";
+        window.prompt(
+          "Name this chapter mystery (yours alone):",
+          "soft rainy glow"
+        ) || "";
       if (!label.trim()) {
         setWhisper("No name yet — that’s okay.");
         return;
@@ -451,12 +615,14 @@ export function startGame(ui) {
       claimPin({
         label: label.trim(),
         note: night.mystery.story_hook,
-        view,
+        view: night.mystery.seed || view,
         emotion: "wonder",
         nightId: night.id,
         kind: "chapter",
       });
-      setWhisper(`✦ ${label.trim()} — chapter mystery claimed.`);
+      setWhisper(
+        `✦ ${label.trim()} — chapter mystery · +${SCORE.CHAPTER_MYSTERY} wonder.`
+      );
       setState(State.FLIGHT);
       refreshOverlays();
       renderHousePins();
@@ -480,7 +646,7 @@ export function startGame(ui) {
     });
     if (session) recordFreePin(session);
     session?.navLog.push(`Pinned: ${pin.label}`);
-    setWhisper(`📌 ${pin.label} saved (personal).`);
+    setWhisper(`📌 ${pin.label} saved · +${SCORE.FREE_PIN} wonder.`);
     refreshOverlays();
     renderHousePins();
     renderMeters();
@@ -494,36 +660,42 @@ export function startGame(ui) {
     lines.push(`Best wonder (house): ${best}`);
     session.navLog.push("--- closeout ---", ...lines);
     setState(State.CLOSEOUT);
+    windshield.setMotionBlur?.(0);
+    windshield.fx?.setThrottle(0);
     setWhisper(lines.join(" · "));
     if (el.navLog()) el.navLog().textContent = lines.join("\n");
     refreshOverlays();
+    renderHousePins();
     renderMeters();
   }
 
+  // —— UI bindings ——
   el.btnBegin()?.addEventListener("click", () => {
-    if (
-      state === State.CLOSEOUT ||
-      state === State.MENU ||
-      state === State.BOOT
-    ) {
-      beginFlight();
-    }
+    if (state === State.CLOSEOUT || state === State.MENU) beginFlight();
   });
   el.btnNext()?.addEventListener("click", nextHeading);
   el.btnSkip()?.addEventListener("click", skipFix);
   el.btnRest()?.addEventListener("click", rest);
   el.btnEnd()?.addEventListener("click", beginCloseout);
   el.btnPin()?.addEventListener("click", () => {
-    if (state === State.MYSTERY || session?.mysteryNear || session?.activeDriftId) {
+    if (
+      state === State.MYSTERY ||
+      session?.mysteryNear ||
+      session?.activeDriftId
+    ) {
       tryClaimMystery();
     } else freePin();
   });
   el.throttle()?.addEventListener("input", (e) => {
     if (!session) return;
     setThrottle(session, e.target.value);
-    if (session.resting) setWhisper("Resting — spoons recovering…");
-    else if (session.spoons < 0.2)
+    if (state === State.REST && session.throttle > 0.04) {
+      leaveRestIfNeeded();
+    } else if (session.resting || state === State.REST) {
+      setWhisper("Resting — spoons recovering…");
+    } else if (session.spoons < 0.2) {
       setWhisper("Easy on the throttle — spoons are thin.");
+    }
   });
 
   window.addEventListener("keydown", (e) => {
@@ -538,7 +710,7 @@ export function startGame(ui) {
         tryClaimMystery();
       } else freePin();
     }
-    if (e.key === " ") {
+    if (e.key === " " || e.code === "Space") {
       if (e.target.matches?.("input, textarea")) return;
       e.preventDefault();
       rest();
@@ -556,6 +728,9 @@ export function startGame(ui) {
     },
     get score() {
       return session?.score ?? 0;
+    },
+    get version() {
+      return CORE_LOOP_VERSION;
     },
   };
 }

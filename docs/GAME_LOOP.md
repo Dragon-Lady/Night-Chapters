@@ -1,69 +1,91 @@
-# Game loop — Night Chapters v0.2
+# Game loop — Night Chapters **core complete** v1.0
 
-## States
+**Status:** Core loop implemented in vanilla JS (`public/js/game-loop.js` · `flight.js` · `pins.js` · `windshield.js`).  
+**Version:** `CORE_LOOP_VERSION = 1.0.0`  
+**Tagline:** *I want to see. I play.*
+
+---
+
+## State machine
 
 ```
 BOOT → MENU → FLIGHT ⇄ ARRIVE
-                ⇄ MYSTERY (drift or chapter)
-                ⇄ REST (throttle ≈ 0, spoons recover)
-              → CLOSEOUT → MENU
+                ⇄ MYSTERY   (drift glow or chapter mystery)
+                ⇄ REST      (Space / Rest · spoons recover)
+              → CLOSEOUT → MENU (Begin night again)
 ```
 
 | State | Glass | Player |
 |-------|--------|--------|
-| **BOOT** | Load Aladin windshield + catalogs | Wait for sky |
-| **MENU** | Parked; overlays show story/mystery seeds | Begin night |
-| **FLIGHT** | Soft glide toward heading bug | Throttle; notice ✧ drift glows |
-| **ARRIVE** | FOV on story pin | Beat (sit / emotion) · Next / Skip |
-| **MYSTERY** | Near drift or chapter glow | **P** to name & save pin · or keep gliding |
-| **REST** | Throttle ≈ 0 | Spoons recover; no failure |
-| **CLOSEOUT** | Nav log + wonder score | Begin again optional |
+| **BOOT** | Load Aladin + FX + catalogs | Wait for sky |
+| **MENU** | Parked; pin/mystery overlays | **Begin night** |
+| **FLIGHT** | Soft throttle glide to heading bug | Throttle · notice ✧ · Space rest |
+| **ARRIVE** | Docked on story pin | Beat · **Next** / **Skip** / Rest |
+| **MYSTERY** | Near drift or chapter glow | **P** claim (optional) · keep gliding |
+| **REST** | Throttle forced ~0 | Spoons recover · throttle/Space to resume |
+| **CLOSEOUT** | Score + nav log | Begin again |
 
-## FLIGHT phase (expanded)
+---
 
-Each animation frame while gliding (`throttle > 0.04` and spoons > 0):
+## FLIGHT (fully implemented)
 
-1. **tickSpoons(dt)** — drain scales with throttle.  
-2. **glideStep** toward current waypoint (next story pin, then chapter mystery).  
-3. **Drift mysteries** — if within notice radius (~4°), mark noticed; within near radius (~1.35°) enter **MYSTERY** with drift hook (optional claim).  
-4. If angular distance to story pin < arrive threshold → **ARRIVE**.  
-5. Update instruments: heading, spoons bar, wonder score, discoveries, ribbon.
+Each frame while `FLIGHT` or `MYSTERY`, throttle > 0.04, spoons > 0, not resting:
 
-Leaving a drift field returns to FLIGHT without penalty.
+1. **`tickSpoons(dt)`** — drain scales with throttle.  
+2. **`glideStep(target, throttle)`** — eased Aladin move toward heading bug (next story pin, then chapter mystery).  
+3. **Drift mysteries** — `night.drift_mysteries[]`: notice ~4°, enter MYSTERY ~1.35°.  
+4. **Story arrive** — dist < 0.35° → **ARRIVE** · score +10 · pin marked discovered.  
+5. Instruments: heading, spoons bar, wonder score, discoveries, ribbon, FX throttle.
 
-## MYSTERY phase (expanded)
+**Controls**
 
-Two kinds:
+| Input | Action |
+|-------|--------|
+| Throttle slider | Glide speed (default soft) |
+| **Space** / Rest | Enter **REST** (toggle resume if spoons ok) |
+| Next heading | Leave ARRIVE/MYSTERY/REST → FLIGHT toward current bug |
+| Skip fix | Skip story pin (allowed, +0 score) |
+| Closeout | End night anytime after start |
 
-| Kind | When | Claim |
-|------|------|--------|
-| **Drift** | Mid-path glows from `night.drift_mysteries[]` | P → name → house pin `kind: drift` · +25 score |
-| **Chapter** | After story ribbon; `night.mystery` | P → name → house pin `kind: chapter` · +40 score |
+---
 
-- Claim is optional. Keep gliding / Next heading always allowed.  
-- Reticle soft-pulses gold in MYSTERY.  
-- Catalog markers: gold for mysteries, blue for story/personal pins.
-
-## Spoon fuel
+## REST + spoon fuel (fully implemented)
 
 | Action | Effect |
 |--------|--------|
-| Glide | Deplete (faster at high throttle) ~90s full→empty at max continuous glide |
-| Rest / Space / throttle ~0 | Recover ~45s empty→full continuous rest |
-| Spoons ≈ 0 | Auto rest; whisper; **no game over** |
+| Glide | Deplete (~90s full→empty at continuous max throttle) |
+| **REST** / Space / throttle ≈ 0 | Recover (~45s empty→full continuous rest) |
+| Spoons ≈ 0 | Auto **REST**; whisper; **no game over** |
+| Throttle up after rest | Resume prior flight-like state when spoons > 2% |
 
 Wonder-first: empty spoons mean *rest*, not fail.
 
-## Personal pins (visual + save)
+---
 
-- **localStorage** key `night-chapters.personalPins.v1`  
-- Aladin catalog overlays + **House pins** panel (fly-to / delete)  
-- Kinds: `personal` · `drift` · `chapter`  
-- Free **P** away from mystery → personal pin · +5 score  
+## MYSTERY (fully implemented)
 
-## Wonder score (pins discovered)
+| Kind | Source | Claim |
+|------|--------|--------|
+| **Drift** | Mid-path `drift_mysteries` during FLIGHT | P → name → localStorage pin `kind: drift` · **+25** |
+| **Chapter** | After story ribbon `night.mystery` | P → name → pin `kind: chapter` · **+40** |
 
-Not a combat score — curiosity only.
+- Objects **appear** as catalog markers + ribbon chips when noticed.  
+- Claim optional; Next / glide always allowed.  
+- Reticle gold pulse in MYSTERY.  
+- Leaving drift field returns to FLIGHT (unless on chapter target).
+
+---
+
+## Personal pins + scoring (fully implemented)
+
+### Save / visuals
+
+- **localStorage** `night-chapters.personalPins.v1`  
+- Aladin catalog overlays (blue story/house · gold mystery)  
+- **House pins** panel: fly-to, delete  
+- Free **P** (not near mystery) → personal pin · **+5**
+
+### Wonder score (pins discovered)
 
 | Discovery | Points |
 |-----------|--------|
@@ -71,21 +93,66 @@ Not a combat score — curiosity only.
 | Drift mystery claimed | +25 |
 | Chapter mystery claimed | +40 |
 | Free personal pin | +5 |
-| Skip story pin | +0 (allowed) |
+| Skip story pin | +0 |
 
-**Pins discovered** count = story + drift + chapter + free pins.  
-**Best wonder** saved in localStorage across nights.
+- **Pins discovered** = story + drift + chapter + free count  
+- **Best wonder** → `night-chapters.bestWonderScore.v1`  
+- Shown on instruments + closeout  
 
-## Events (schema hooks)
+Not a combat score — curiosity only.
 
-- `on_night_start` · `on_glide` · `on_pin_arrive` · `on_fly`  
-- `on_mystery_near` (drift or chapter) · `on_mystery_claim`  
-- `on_rest` · `on_closeout`  
+---
 
-## Wonder-first rules in code
+## Frame order (reference)
 
-- Default throttle low.  
-- Rest never costs progress or score.  
-- Skip pin allowed (no score for that pin).  
-- Score is discovery, not time pressure.  
-- Spoons empty → rest, never crash.  
+```
+rAF tick:
+  if no session → meters only
+  if ACTIVE night:
+    tickSpoons
+    if empty → enterRest
+    if REST → recover, maybe leaveRest
+    if ARRIVE → parked
+    if FLIGHT|MYSTERY && throttle:
+      glideStep
+      notice/near drift → MYSTERY
+      near chapter mystery → MYSTERY
+      near story pin → ARRIVE
+    renderMeters
+```
+
+---
+
+## Files
+
+| Module | Role |
+|--------|------|
+| `game-loop.js` | States, tick, controls, claim flows |
+| `flight.js` | Session, spoons, score, drift helpers |
+| `pins.js` | localStorage pins + house UI |
+| `windshield.js` | Aladin + glide + overlays + FX |
+| `fx-layer.js` | Particles / sky veil |
+| `nights.js` + `data/nights/*.json` | Chapters |
+
+---
+
+## Wonder-first rules (locked)
+
+- Default throttle low  
+- Rest never costs progress or score  
+- Skip allowed  
+- Score = discovery, not speedrun  
+- Spoons empty → rest, never crash  
+- No weapons, no fail state  
+
+---
+
+## Play smoke (manual)
+
+1. `npm start` → http://localhost:4343  
+2. Begin night · raise throttle · glass glides  
+3. Space → REST · spoons climb · throttle again → FLIGHT  
+4. Pass near ✧ · P to name · house pin appears  
+5. Finish ribbon · chapter ✦ · claim · closeout score  
+
+Core loop **done**. Later: more nights, companion voice, postcard share.
