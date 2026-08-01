@@ -61,7 +61,7 @@ import {
   buildExportPayload,
 } from "./export.js";
 
-export const CORE_LOOP_VERSION = "1.4.1";
+export const CORE_LOOP_VERSION = "1.4.2";
 
 const State = {
   BOOT: "BOOT",
@@ -345,7 +345,14 @@ export function startGame(ui) {
     screen.setAttribute("aria-hidden", show ? "false" : "true");
   }
 
-  function nudgeThrottle(delta) {
+  const THROTTLE_STEP = 0.1;
+  let lastThrottleKeyAt = 0;
+
+  /**
+   * @param {number} delta  + up / − down
+   * @param {{ repeat?: boolean }} [opts]
+   */
+  function nudgeThrottle(delta, opts = {}) {
     // Allow throttle while a flight session is open (FLIGHT/MYSTERY/ARRIVE/REST)
     if (!session) return;
     if (
@@ -355,23 +362,32 @@ export function startGame(ui) {
     ) {
       return;
     }
+    // Key-repeat can fire ~30/s — rate-limit for controllable glide
+    const now = performance.now();
+    if (opts.repeat && now - lastThrottleKeyAt < 80) return;
+    lastThrottleKeyAt = now;
+
+    const step = opts.repeat ? THROTTLE_STEP * 0.5 : THROTTLE_STEP;
+    const signed = delta > 0 ? step : delta < 0 ? -step : 0;
+    if (!signed) return;
+
     const slider = el.throttle();
     const cur = slider
       ? Number(slider.value || 0)
       : Number(session.throttle || 0);
-    const next = Math.max(0, Math.min(1, cur + delta));
-    if (slider) slider.value = String(next);
+    const next = Math.max(0, Math.min(1, Math.round((cur + signed) * 100) / 100));
+    if (slider) {
+      slider.value = String(next);
+      // keep DOM range in sync for accessibility
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     setThrottle(session, next);
     if (state === State.REST && next > 0.04) leaveRestIfNeeded();
-    // If resting via flag but still FLIGHT-like, leave rest when throttling up
     if (session.resting && next > 0.04 && state !== State.REST) {
       session.resting = false;
     }
     audio.setWind(session.resting ? 0 : next);
     windshield.fx?.setThrottle(session.resting ? 0 : next);
-    if (next > 0.04 && state === State.ARRIVE) {
-      // gentle: stay on pin until Next, but allow throttle prep
-    }
     renderMeters();
   }
 
@@ -1092,6 +1108,9 @@ export function startGame(ui) {
   /**
    * Capture phase so Aladin (or focused range inputs) cannot swallow
    * flight keys before we handle them.
+   *
+   * Throttle: W / ↑ = up · S / ↓ = down (step 0.1)
+   * Skip fix: X (S is throttle, not skip)
    */
   function onKeyDown(e) {
     const tag = (e.target && e.target.tagName) || "";
@@ -1104,18 +1123,26 @@ export function startGame(ui) {
 
     const code = e.code || "";
     const k = e.key || "";
-    const isArrow =
+    const flying = !!(session && ACTIVE.has(state));
+
+    // Throttle first — before skip/other letter keys
+    const throttleUp =
+      k === "w" ||
+      k === "W" ||
+      code === "KeyW" ||
       k === "ArrowUp" ||
+      code === "ArrowUp";
+    const throttleDown =
+      k === "s" ||
+      k === "S" ||
+      code === "KeyS" ||
       k === "ArrowDown" ||
-      code === "ArrowUp" ||
       code === "ArrowDown";
 
-    // Always handle arrows during an active flight session (even if focus is on range/Aladin)
-    if (isArrow && session && ACTIVE.has(state)) {
+    if (flying && (throttleUp || throttleDown)) {
       e.preventDefault();
       e.stopPropagation();
-      if (k === "ArrowUp" || code === "ArrowUp") nudgeThrottle(0.1);
-      else nudgeThrottle(-0.1);
+      nudgeThrottle(throttleUp ? 1 : -1, { repeat: !!e.repeat });
       return;
     }
 
@@ -1183,7 +1210,8 @@ export function startGame(ui) {
       nextHeading();
       return;
     }
-    if (k === "s" || k === "S") {
+    // Skip fix: X (S is reserved for throttle down)
+    if (k === "x" || k === "X" || code === "KeyX") {
       e.preventDefault();
       skipFix();
       return;
@@ -1209,20 +1237,10 @@ export function startGame(ui) {
     if (k === " " || code === "Space") {
       e.preventDefault();
       rest();
-      return;
-    }
-    // W/S alternate throttle (in case arrows still blocked somewhere)
-    if (k === "w" || k === "W") {
-      e.preventDefault();
-      if (session && ACTIVE.has(state)) nudgeThrottle(0.1);
-      return;
-    }
-    if ((k === "s" || k === "S") && e.shiftKey) {
-      /* skip already handled */
     }
   }
 
-  // Capture on window only (once) so Aladin cannot swallow flight keys
+  // Capture on window so Aladin cannot swallow flight keys
   window.addEventListener("keydown", onKeyDown, true);
 
   boot();

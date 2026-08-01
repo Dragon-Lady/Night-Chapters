@@ -40,9 +40,10 @@ npm start
 | `M` | Mute |
 | `1`–`4` | Select chapter (menu) |
 | `Enter` / `B` | Begin night |
-| `↑` / `↓` | Throttle |
+| `W` / `↑` | Throttle up (+0.1) |
+| `S` / `↓` | Throttle down (−0.1) |
 | `N` | Next heading |
-| `S` | Skip fix |
+| `X` | Skip fix |
 | `Space` | Rest |
 | `P` | Pin / claim |
 | `C` | Closeout |
