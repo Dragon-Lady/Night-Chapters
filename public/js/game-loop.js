@@ -69,7 +69,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.6.7";
+export const CORE_LOOP_VERSION = "1.6.8";
 
 const State = {
   BOOT: "BOOT",
@@ -951,10 +951,10 @@ export function startGame(ui) {
       if (night.pins?.length) {
         const first = night.pins[0];
         if (first?.view) {
-          // Wide cruise FoV so HiPS motion is obvious
+          // Wide cruise FoV so ribbon + anchors are easy to find
           const startView = {
             ...first.view,
-            fov: Math.max(5.5, Number(first.view.fov) || 5.5),
+            fov: Math.max(16, Number(first.view.fov) || 16),
           };
           windshield.goto(startView, { hard: true });
         }

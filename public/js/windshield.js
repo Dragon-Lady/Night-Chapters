@@ -9,10 +9,15 @@
 const BOOT = {
   ra: 83.8221,
   dec: -5.3911,
-  fov: 8.0,
+  /** Wider default — easier to find ribbon + anchors while yawing */
+  fov: 16,
   /** Bearing on sky: 0° = +RA (east), 90° = +Dec (north) */
   heading: 90,
 };
+
+/** Cruise FoV floor (zoom-out comfort) */
+const CRUISE_FOV_MIN = 14;
+const CRUISE_FOV_MAX = 22;
 
 /** Low-end crawl so ~5% throttle feels gentle; high end still readable */
 const MAX_DEG_PER_SEC = 11;
@@ -558,17 +563,18 @@ export function createWindshield(
     ctx.rotate(worldRotationRad());
     ctx.translate(-cx, -cy);
     drawDustLayer();
+    drawCoordGrid(); // faint, behind ribbon/anchors
     drawMilkyBand();
     drawNebulae();
     drawLandmarks(t);
     drawFieldStars(t);
     drawClouds(t);
-    drawCoordGrid();
     drawOverlays();
     ctx.restore();
 
     // Screen-space layers (not rotated)
     drawNearStars(dt, t);
+    drawCardinalRim();
     drawHeadingHud();
     drawVignette();
   }
@@ -604,7 +610,7 @@ export function createWindshield(
     ctx.font = "12px system-ui, sans-serif";
     ctx.fillStyle = "rgba(220, 232, 255, 0.85)";
     ctx.textAlign = "center";
-    ctx.fillText(`hdg ${Math.round(heading)}°`, cx, cy + len + 26);
+    ctx.fillText(`hdg ${Math.round(heading)}° · FoV ${cam.fov.toFixed(0)}°`, cx, cy + len + 26);
     if (Math.abs(steerInput) > 0.02) {
       ctx.fillStyle = "rgba(255, 215, 138, 0.95)";
       ctx.fillText(steerInput > 0 ? "turning right →" : "← turning left", cx, cy + len + 42);
@@ -661,74 +667,96 @@ export function createWindshield(
     ctx.fillRect(0, 0, w, h);
   }
 
-  /** Dense dust that scrolls in screen space — obvious pan cue */
+  /** Sparse soft dust — less visual noise than before */
   function drawDustLayer() {
-    const cell = 48;
+    const cell = 64;
     ctx.save();
-    ctx.globalAlpha = 0.55;
+    ctx.globalAlpha = 0.28;
     for (let yy = -cell; yy < h + cell; yy += cell) {
       for (let xx = -cell; xx < w + cell; xx += cell) {
         const px = xx + dustOx;
         const py = yy + dustOy;
-        const fx = ((px % cell) + cell) % cell;
-        const fy = ((py % cell) + cell) % cell;
-        const x = xx + fx * 0.15;
-        const y = yy + fy * 0.15;
         const n = hash01(Math.floor(px / cell), Math.floor(py / cell));
-        if (n < 0.35) continue;
-        const r = 0.4 + n * 1.2;
+        if (n < 0.55) continue;
+        const r = 0.5 + n * 1.1;
         ctx.fillStyle =
-          n > 0.85
-            ? `rgba(255, 230, 200, ${0.25 + n * 0.4})`
-            : `rgba(200, 220, 255, ${0.2 + n * 0.35})`;
+          n > 0.88
+            ? `rgba(255, 230, 200, ${0.2 + n * 0.25})`
+            : `rgba(200, 220, 255, ${0.15 + n * 0.2})`;
         ctx.beginPath();
-        ctx.arc(x + n * cell * 0.5, y + (1 - n) * cell * 0.5, r, 0, Math.PI * 2);
+        ctx.arc(
+          xx + n * cell * 0.5,
+          yy + (1 - n) * cell * 0.5,
+          r,
+          0,
+          Math.PI * 2
+        );
         ctx.fill();
       }
     }
     ctx.restore();
   }
 
+  /**
+   * The “ribbon” — soft galactic band near Dec +20°.
+   * Wider / brighter so it’s findable while yawing slowly.
+   */
   function drawMilkyBand() {
-    // Band along dec≈20°, projected with heading so it yaws with the sky
-    const samples = 24;
+    const samples = 36;
+    const halfSpan = Math.max(50, cam.fov * 2.2);
     ctx.save();
-    ctx.strokeStyle =
-      weatherMood === "cold"
-        ? "rgba(200, 215, 255, 0.14)"
-        : "rgba(200, 210, 255, 0.11)";
-    ctx.lineWidth = Math.max(18, Math.min(w, h) * 0.06);
+    // Soft outer glow
     ctx.lineCap = "round";
-    ctx.beginPath();
-    let started = false;
-    for (let i = 0; i <= samples; i++) {
-      const ra = cam.ra - 40 + (i / samples) * 80;
-      const p = project(ra, 20);
-      if (!p) continue;
-      if (!started) {
-        ctx.moveTo(p.x, p.y);
-        started = true;
-      } else ctx.lineTo(p.x, p.y);
+    ctx.lineJoin = "round";
+    const drawBand = (dec, width, alpha) => {
+      ctx.strokeStyle = `rgba(210, 220, 255, ${alpha})`;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i <= samples; i++) {
+        const ra = cam.ra - halfSpan + (i / samples) * halfSpan * 2;
+        const p = project(ra, dec);
+        if (!p) continue;
+        if (!started) {
+          ctx.moveTo(p.x, p.y);
+          started = true;
+        } else ctx.lineTo(p.x, p.y);
+      }
+      if (started) ctx.stroke();
+    };
+    const baseW = Math.max(28, Math.min(w, h) * 0.09);
+    drawBand(20, baseW * 1.8, 0.06);
+    drawBand(20, baseW, 0.14);
+    drawBand(18, baseW * 0.45, 0.1);
+    drawBand(22, baseW * 0.4, 0.08);
+    // Label near band if on glass
+    const mid = project(cam.ra, 20);
+    if (mid && mid.x > 40 && mid.x < w - 40 && mid.y > 20 && mid.y < h - 20) {
+      ctx.font = "bold 12px system-ui, sans-serif";
+      ctx.fillStyle = "rgba(200, 215, 255, 0.45)";
+      ctx.textAlign = "center";
+      ctx.fillText("∽ ribbon", mid.x, mid.y - baseW * 0.55);
     }
-    if (started) ctx.stroke();
     ctx.restore();
   }
 
-  /** Faint RA/Dec grid — lines rotate with heading via project() */
+  /**
+   * Very faint grid — orientation only, not a cage.
+   * Wider spacing when zoomed out; low alpha.
+   */
   function drawCoordGrid() {
     const fov = Math.max(2, cam.fov);
-    const step = fov > 12 ? 10 : fov > 6 ? 5 : 2;
+    const step = fov > 18 ? 20 : fov > 12 ? 15 : 10;
     ctx.save();
-    ctx.strokeStyle = "rgba(140, 170, 220, 0.14)";
+    ctx.strokeStyle = "rgba(140, 170, 220, 0.045)";
     ctx.lineWidth = 1;
-    // Constant-RA meridians
-    const ra0 = Math.floor(cam.ra / step) * step - step * 5;
-    for (let i = 0; i < 14; i++) {
+    const ra0 = Math.floor(cam.ra / step) * step - step * 4;
+    for (let i = 0; i < 10; i++) {
       const ra = ra0 + i * step;
       ctx.beginPath();
       let started = false;
-      for (let j = 0; j <= 12; j++) {
-        const dec = cam.dec - step * 6 + j * step;
+      for (let j = 0; j <= 10; j++) {
+        const dec = cam.dec - step * 5 + j * step;
         if (dec < -90 || dec > 90) continue;
         const p = project(ra, dec);
         if (!p) continue;
@@ -739,15 +767,14 @@ export function createWindshield(
       }
       if (started) ctx.stroke();
     }
-    // Constant-Dec parallels
-    const dec0 = Math.floor(cam.dec / step) * step - step * 5;
-    for (let i = 0; i < 14; i++) {
+    const dec0 = Math.floor(cam.dec / step) * step - step * 4;
+    for (let i = 0; i < 10; i++) {
       const dec = dec0 + i * step;
       if (dec < -90 || dec > 90) continue;
       ctx.beginPath();
       let started = false;
-      for (let j = 0; j <= 12; j++) {
-        const ra = cam.ra - step * 6 + j * step;
+      for (let j = 0; j <= 10; j++) {
+        const ra = cam.ra - step * 5 + j * step;
         const p = project(ra, dec);
         if (!p) continue;
         if (!started) {
@@ -756,6 +783,53 @@ export function createWindshield(
         } else ctx.lineTo(p.x, p.y);
       }
       if (started) ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Screen-edge N/E/S/W so yaw has absolute orientation
+   * (world is rotated under a fixed nose-up pip).
+   */
+  function drawCardinalRim() {
+    if (!isFlightPhase() && phase !== "MENU") return;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const R = Math.min(w, h) * 0.42;
+    // Map celestial directions into north-up screen, then same rot as world
+    const dirs = [
+      { name: "N", east: 0, north: 1 },
+      { name: "E", east: 1, north: 0 },
+      { name: "S", east: 0, north: -1 },
+      { name: "W", east: -1, north: 0 },
+    ];
+    const rot = worldRotationRad();
+    const cosR = Math.cos(rot);
+    const sinR = Math.sin(rot);
+    ctx.save();
+    ctx.font = "bold 13px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const d of dirs) {
+      // north-up unit → screen before rot: east→+x, north→−y
+      let dx = d.east;
+      let dy = -d.north;
+      const rdx = dx * cosR - dy * sinR;
+      const rdy = dx * sinR + dy * cosR;
+      const len = Math.hypot(rdx, rdy) || 1;
+      const x = cx + (rdx / len) * R;
+      const y = cy + (rdy / len) * R;
+      ctx.fillStyle =
+        d.name === "N"
+          ? "rgba(255, 220, 160, 0.75)"
+          : "rgba(180, 200, 230, 0.5)";
+      ctx.fillText(d.name, x, y);
+      // small tick toward center
+      ctx.strokeStyle = "rgba(180, 200, 230, 0.25)";
+      ctx.beginPath();
+      ctx.moveTo(cx + (rdx / len) * (R - 14), cy + (rdy / len) * (R - 14));
+      ctx.lineTo(cx + (rdx / len) * (R - 4), cy + (rdy / len) * (R - 4));
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -770,7 +844,8 @@ export function createWindshield(
       if (!p) continue;
       const pulse =
         0.75 + 0.25 * Math.sin(t * 1.1 * L.pulse + L.tw);
-      const base = Math.max(28, 42 * L.size * (p.scale / 55));
+      // Keep anchors readable even at wide cruise FoV
+      const base = Math.max(32, 56 * L.size * (p.scale / 40));
       const hue = L.hue;
 
       if (L.kind === "nebula") {
@@ -853,11 +928,13 @@ export function createWindshield(
         ctx.stroke();
       }
 
-      // Label (always readable when on glass)
-      if (L.label && p.x > 8 && p.x < w - 8 && p.y > 12 && p.y < h - 8) {
-        ctx.font = "11px system-ui, sans-serif";
+      // Stronger labels so anchors read while yawing
+      if (L.label && p.x > 8 && p.x < w - 8 && p.y > 14 && p.y < h - 8) {
+        ctx.font = "bold 12px system-ui, sans-serif";
         ctx.textAlign = "left";
-        ctx.fillStyle = `rgba(230, 236, 255, ${0.55 + 0.25 * pulse})`;
+        ctx.fillStyle = `rgba(8, 12, 20, ${0.35 * pulse})`;
+        ctx.fillText(L.label, p.x + 11, p.y - 7);
+        ctx.fillStyle = `rgba(240, 244, 255, ${0.7 + 0.25 * pulse})`;
         ctx.fillText(L.label, p.x + 10, p.y - 8);
       }
     }
@@ -1096,7 +1173,7 @@ export function createWindshield(
     if (!view) return;
     cam.ra = Number(view.ra);
     cam.dec = Number(view.dec);
-    if (view.fov != null) cam.fov = Math.max(4, Number(view.fov));
+    if (view.fov != null) cam.fov = Math.max(CRUISE_FOV_MIN * 0.7, Number(view.fov));
     if (view.heading != null && Number.isFinite(Number(view.heading))) {
       heading = ((Number(view.heading) % 360) + 360) % 360;
     }
@@ -1156,14 +1233,14 @@ export function createWindshield(
       }
     }
 
-    // Soft FoV toward pin when near
-    if (hasTarget && target.fov != null && Number.isFinite(Number(target.fov))) {
-      const tFov = Math.max(5.5, Number(target.fov));
-      if (dist < 8) {
-        cam.fov = cam.fov + (tFov - cam.fov) * Math.min(1, 0.45 * dt);
-      }
-    } else if (t > 0.04 && cam.fov < 8) {
-      cam.fov = Math.min(10, cam.fov + 1.5 * dt);
+    // Keep a comfortable zoom-out cruise FoV (ribbon + anchors readable)
+    if (hasTarget && target.fov != null && Number.isFinite(Number(target.fov)) && dist < 6) {
+      const tFov = Math.max(CRUISE_FOV_MIN * 0.85, Number(target.fov));
+      cam.fov = cam.fov + (tFov - cam.fov) * Math.min(1, 0.35 * dt);
+    } else if (cam.fov < CRUISE_FOV_MIN) {
+      cam.fov = cam.fov + (CRUISE_FOV_MIN - cam.fov) * Math.min(1, 0.8 * dt);
+    } else if (cam.fov > CRUISE_FOV_MAX) {
+      cam.fov = cam.fov + (CRUISE_FOV_MAX - cam.fov) * Math.min(1, 0.5 * dt);
     }
 
     const steer = Math.max(-1, Math.min(1, steerInput || 0));
