@@ -61,7 +61,7 @@ import {
   buildExportPayload,
 } from "./export.js";
 
-export const CORE_LOOP_VERSION = "1.4.0";
+export const CORE_LOOP_VERSION = "1.4.1";
 
 const State = {
   BOOT: "BOOT",
@@ -151,6 +151,12 @@ export function startGame(ui) {
   function setWhisper(text) {
     const w = el.whisper();
     if (w) w.textContent = text;
+    const compact = document.getElementById("whisper-compact");
+    if (compact) {
+      compact.textContent = text;
+      // show compact line only while panel is collapsed
+      compact.hidden = !document.body.classList.contains("panel-collapsed");
+    }
   }
 
   function setState(next) {
@@ -167,6 +173,20 @@ export function startGame(ui) {
         next === State.CLOSEOUT ||
         next === State.BOOT
       );
+    }
+    // Auto-collapse instruments during flight so sky stays open;
+    // expand again on menu / closeout for chapter pick.
+    if (
+      next === State.FLIGHT ||
+      next === State.MYSTERY ||
+      next === State.ARRIVE ||
+      next === State.REST
+    ) {
+      if (prev === State.MENU || prev === State.CLOSEOUT || prev === State.BOOT) {
+        setPanelCollapsed(true);
+      }
+    } else if (next === State.MENU || next === State.CLOSEOUT) {
+      setPanelCollapsed(false);
     }
     // Audio phase cues
     if (next === State.REST && prev !== State.REST) {
@@ -1054,6 +1074,8 @@ export function startGame(ui) {
   el.throttle()?.addEventListener("input", (e) => {
     if (!session) return;
     setThrottle(session, e.target.value);
+    audio.setWind(session.resting ? 0 : session.throttle);
+    windshield.fx?.setThrottle(session.resting ? 0 : session.throttle);
     if (state === State.REST && session.throttle > 0.04) {
       leaveRestIfNeeded();
     } else if (session.resting || state === State.REST) {
@@ -1063,9 +1085,41 @@ export function startGame(ui) {
     }
   });
 
-  window.addEventListener("keydown", (e) => {
-    if (e.target.matches?.("input, textarea, select")) return;
-    const k = e.key;
+  document.getElementById("btn-panel-toggle")?.addEventListener("click", () => {
+    togglePanel();
+  });
+
+  /**
+   * Capture phase so Aladin (or focused range inputs) cannot swallow
+   * flight keys before we handle them.
+   */
+  function onKeyDown(e) {
+    const tag = (e.target && e.target.tagName) || "";
+    const isTyping =
+      tag === "TEXTAREA" ||
+      (tag === "INPUT" &&
+        e.target.type !== "range" &&
+        e.target.type !== "button" &&
+        e.target.type !== "checkbox");
+
+    const code = e.code || "";
+    const k = e.key || "";
+    const isArrow =
+      k === "ArrowUp" ||
+      k === "ArrowDown" ||
+      code === "ArrowUp" ||
+      code === "ArrowDown";
+
+    // Always handle arrows during an active flight session (even if focus is on range/Aladin)
+    if (isArrow && session && ACTIVE.has(state)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (k === "ArrowUp" || code === "ArrowUp") nudgeThrottle(0.1);
+      else nudgeThrottle(-0.1);
+      return;
+    }
+
+    if (isTyping) return;
 
     // Help / export overlays
     if (k === "?" || k === "h" || k === "H") {
@@ -1099,6 +1153,12 @@ export function startGame(ui) {
         syncMuteButton();
         setWhisper(audio.muted ? "Sound off." : "Sound on.");
       });
+      return;
+    }
+
+    if (k === "[" || k === "]") {
+      e.preventDefault();
+      togglePanel();
       return;
     }
 
@@ -1146,22 +1206,24 @@ export function startGame(ui) {
       } else freePin();
       return;
     }
-    if (k === " " || e.code === "Space") {
+    if (k === " " || code === "Space") {
       e.preventDefault();
       rest();
       return;
     }
-    if (k === "ArrowUp") {
+    // W/S alternate throttle (in case arrows still blocked somewhere)
+    if (k === "w" || k === "W") {
       e.preventDefault();
-      nudgeThrottle(0.08);
+      if (session && ACTIVE.has(state)) nudgeThrottle(0.1);
       return;
     }
-    if (k === "ArrowDown") {
-      e.preventDefault();
-      nudgeThrottle(-0.08);
-      return;
+    if ((k === "s" || k === "S") && e.shiftKey) {
+      /* skip already handled */
     }
-  });
+  }
+
+  // Capture on window only (once) so Aladin cannot swallow flight keys
+  window.addEventListener("keydown", onKeyDown, true);
 
   boot();
 
