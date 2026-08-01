@@ -3,13 +3,23 @@
  * Tagline: I want to see. I play.
  */
 
+import { bindKeys } from "./keys.js";
 import { startGame } from "./game-loop.js";
+
+// Bind keyboard shell before game/Aladin finish booting
+bindKeys();
 
 function main() {
   const root = document.getElementById("app");
   if (!root) {
     console.error("No #app");
     return;
+  }
+
+  try {
+    document.body.tabIndex = -1;
+  } catch {
+    /* ignore */
   }
 
   startGame({

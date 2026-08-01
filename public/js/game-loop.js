@@ -60,8 +60,9 @@ import {
   toJson,
   buildExportPayload,
 } from "./export.js";
+import { setKeyHandler, rebindKeys, bindKeys } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.4.2";
+export const CORE_LOOP_VERSION = "1.4.3";
 
 const State = {
   BOOT: "BOOT",
@@ -1106,26 +1107,32 @@ export function startGame(ui) {
   });
 
   /**
-   * Capture phase so Aladin (or focused range inputs) cannot swallow
-   * flight keys before we handle them.
+   * Flight / menu keys. Registered via keys.js (capture + bubble, deduped)
+   * and re-bound after Aladin boots so the canvas cannot steal input.
    *
    * Throttle: W / ↑ = up · S / ↓ = down (step 0.1)
-   * Skip fix: X (S is throttle, not skip)
+   * Skip fix: X
    */
   function onKeyDown(e) {
+    if (e.defaultPrevented) return;
+
     const tag = (e.target && e.target.tagName) || "";
+    const type = (e.target && e.target.type) || "";
     const isTyping =
       tag === "TEXTAREA" ||
+      tag === "SELECT" ||
       (tag === "INPUT" &&
-        e.target.type !== "range" &&
-        e.target.type !== "button" &&
-        e.target.type !== "checkbox");
+        type !== "range" &&
+        type !== "button" &&
+        type !== "checkbox" &&
+        type !== "radio" &&
+        type !== "submit");
 
     const code = e.code || "";
     const k = e.key || "";
     const flying = !!(session && ACTIVE.has(state));
 
-    // Throttle first — before skip/other letter keys
+    // Throttle — highest priority while a night is active
     const throttleUp =
       k === "w" ||
       k === "W" ||
@@ -1141,14 +1148,13 @@ export function startGame(ui) {
 
     if (flying && (throttleUp || throttleDown)) {
       e.preventDefault();
-      e.stopPropagation();
+      // do not stopImmediatePropagation — keys.js already dedupes
       nudgeThrottle(throttleUp ? 1 : -1, { repeat: !!e.repeat });
       return;
     }
 
     if (isTyping) return;
 
-    // Help / export overlays
     if (k === "?" || k === "h" || k === "H") {
       e.preventDefault();
       const open = el.helpScreen() && !el.helpScreen().hidden;
@@ -1189,7 +1195,6 @@ export function startGame(ui) {
       return;
     }
 
-    // Chapter pick 1–4
     if (k >= "1" && k <= "4") {
       e.preventDefault();
       selectChapterByIndex(Number(k) - 1);
@@ -1210,7 +1215,6 @@ export function startGame(ui) {
       nextHeading();
       return;
     }
-    // Skip fix: X (S is reserved for throttle down)
     if (k === "x" || k === "X" || code === "KeyX") {
       e.preventDefault();
       skipFix();
@@ -1240,8 +1244,16 @@ export function startGame(ui) {
     }
   }
 
-  // Capture on window so Aladin cannot swallow flight keys
-  window.addEventListener("keydown", onKeyDown, true);
+  // Attach immediately (keys.js also binds at import time)
+  bindKeys();
+  setKeyHandler(onKeyDown);
+
+  // Focus shell so keys aren't stuck on a dead target after clicks on canvas
+  try {
+    document.body.tabIndex = -1;
+  } catch {
+    /* ignore */
+  }
 
   boot();
 
