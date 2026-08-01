@@ -326,13 +326,58 @@ export function startGame(ui) {
   }
 
   function nudgeThrottle(delta) {
-    if (!session || !el.throttle()) return;
-    const cur = Number(el.throttle().value || 0);
+    // Allow throttle while a flight session is open (FLIGHT/MYSTERY/ARRIVE/REST)
+    if (!session) return;
+    if (
+      state === State.MENU ||
+      state === State.BOOT ||
+      state === State.CLOSEOUT
+    ) {
+      return;
+    }
+    const slider = el.throttle();
+    const cur = slider
+      ? Number(slider.value || 0)
+      : Number(session.throttle || 0);
     const next = Math.max(0, Math.min(1, cur + delta));
-    el.throttle().value = String(next);
+    if (slider) slider.value = String(next);
     setThrottle(session, next);
     if (state === State.REST && next > 0.04) leaveRestIfNeeded();
+    // If resting via flag but still FLIGHT-like, leave rest when throttling up
+    if (session.resting && next > 0.04 && state !== State.REST) {
+      session.resting = false;
+    }
     audio.setWind(session.resting ? 0 : next);
+    windshield.fx?.setThrottle(session.resting ? 0 : next);
+    if (next > 0.04 && state === State.ARRIVE) {
+      // gentle: stay on pin until Next, but allow throttle prep
+    }
+    renderMeters();
+  }
+
+  function setPanelCollapsed(collapsed) {
+    document.body.classList.toggle("panel-collapsed", !!collapsed);
+    const btn = document.getElementById("btn-panel-toggle");
+    if (btn) {
+      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      btn.textContent = collapsed ? "Show panel ▴" : "Hide panel ▾";
+      btn.title = collapsed
+        ? "Expand choose-a-night / instruments"
+        : "Collapse panel for full sky";
+    }
+    // Aladin / FX need a resize after layout change
+    requestAnimationFrame(() => {
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {
+        /* ignore */
+      }
+      windshield.fx?.resize?.();
+    });
+  }
+
+  function togglePanel() {
+    setPanelCollapsed(!document.body.classList.contains("panel-collapsed"));
   }
 
   function selectChapterByIndex(i) {

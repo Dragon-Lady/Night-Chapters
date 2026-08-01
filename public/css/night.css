@@ -175,9 +175,11 @@ header .tagline {
 
 #aladin-lite-div,
 .aladin-glass {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  min-height: 420px;
+  min-height: 0;
   transition: filter 0.12s linear, transform 0.12s linear;
   will-change: filter, transform;
 }
@@ -288,14 +290,76 @@ header .tagline {
   }
 }
 
-/* instruments */
+/* instruments — compact by default height; collapsible for full sky */
 .instruments {
   position: relative;
-  z-index: 5;
+  z-index: 10;
+  flex: 0 1 auto;
+  max-height: min(28dvh, 280px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  background: var(--void);
+  border-top: 1px solid var(--border);
+  transition: max-height 0.25s ease;
+}
+
+.panel-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.panel-toggle {
+  font-size: 0.72rem;
+  padding: 0.28rem 0.65rem;
+  flex: 0 0 auto;
+}
+
+.whisper-compact {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--glow);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.instruments-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
   gap: 0.65rem;
-  padding: 0.65rem 0.75rem 1rem;
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.4));
+  padding: 0.45rem 0.75rem 0.65rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Collapsed: only the thin toolbar — sky gets the rest */
+body.panel-collapsed .instruments {
+  max-height: 2.75rem;
+}
+
+body.panel-collapsed .instruments-body {
+  display: none;
+}
+
+body.panel-collapsed #sky-stage {
+  flex: 1 1 auto;
+  min-height: 50dvh;
+}
+
+body:not(.panel-collapsed) .whisper-compact {
+  display: none;
 }
 
 .panel-subhead {
@@ -777,10 +841,13 @@ body[data-phase="MYSTERY"] .reticle::after {
 
 .footer-note {
   position: relative;
-  z-index: 5;
-  padding: 0 1rem 0.85rem;
+  z-index: 10;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.35rem 0.85rem 0.55rem;
   font-size: 0.7rem;
   color: var(--mist-dim);
+  background: var(--void);
 }
 
 kbd {
@@ -799,26 +866,28 @@ kbd {
 
 @media (max-width: 720px) {
   header.cockpit-top {
-    padding: 0.5rem 0.65rem 0.25rem;
+    padding: 0.45rem 0.55rem;
+    gap: 0.35rem 0.5rem;
   }
 
   header h1 {
     font-size: 0.95rem;
   }
 
-  #sky-stage {
-    margin: 0 0.4rem;
-    min-height: 42dvh;
-    border-radius: 0.75rem;
+  header .tagline {
+    font-size: 0.72rem;
   }
 
-  #aladin-lite-div,
-  .aladin-glass {
-    min-height: 280px;
+  #sky-stage {
+    margin: 0.35rem 0.4rem 0.25rem;
+    border-radius: 0.75rem;
+    /* keep a real glass height on phones */
+    min-height: 36dvh;
   }
 
   .instruments {
-    padding: 0.5rem 0.5rem 0.85rem;
+    max-height: min(48dvh, 380px);
+    padding: 0.45rem 0.5rem 0.65rem;
   }
 
   .panel {
@@ -839,11 +908,11 @@ kbd {
   }
 
   .house-pins {
-    max-height: 160px;
+    max-height: 140px;
   }
 
   .footer-note {
-    padding: 0 0.65rem 0.75rem;
+    padding: 0.3rem 0.55rem 0.45rem;
     font-size: 0.65rem;
   }
 }
@@ -853,10 +922,18 @@ kbd {
     grid-template-columns: 1fr;
   }
 
+  .header-brand {
+    flex: 1 1 100%;
+  }
+
   .header-actions {
     width: 100%;
     margin-left: 0;
     justify-content: flex-start;
+  }
+
+  #sky-stage {
+    min-height: 32dvh;
   }
 }
 

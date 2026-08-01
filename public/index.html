@@ -139,61 +139,76 @@
       </div>
     </div>
 
-    <section class="instruments" aria-label="Soft instruments">
-      <div class="panel panel-primary">
-        <h2>Choose a night</h2>
-        <div id="progress-summary" class="progress-summary"></div>
-        <div
-          id="chapter-list"
-          class="chapter-list"
-          role="listbox"
-          aria-label="Guided night chapters"
-        ></div>
-        <h2 class="panel-subhead">Whisper</h2>
-        <p id="whisper" class="whisper">Warming the glass…</p>
-        <div class="row controls-row">
-          <button type="button" class="primary" id="btn-begin">Begin night</button>
-          <button type="button" id="btn-next" disabled>Next heading</button>
-          <button type="button" id="btn-skip" disabled>Skip fix</button>
-          <button type="button" id="btn-rest" disabled>Rest</button>
-          <button type="button" id="btn-pin" disabled title="P">Pin / Claim ✦</button>
-          <button type="button" id="btn-end" disabled>Closeout</button>
-        </div>
-        <label class="throttle">
-          Throttle (glide)
-          <input
-            id="throttle"
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value="0.25"
-          />
-        </label>
+    <section class="instruments" aria-label="Soft instruments" id="instruments">
+      <div class="panel-toolbar">
+        <button
+          type="button"
+          id="btn-panel-toggle"
+          class="panel-toggle"
+          aria-expanded="true"
+          aria-controls="instruments-body"
+          title="Collapse panel for full sky ([)"
+        >
+          Hide panel ▾
+        </button>
+        <p id="whisper-compact" class="whisper-compact" hidden></p>
       </div>
-
-      <div class="panel panel-secondary">
-        <h2>Soft instruments</h2>
-        <div class="meters">
-          <div>Heading bug: <strong id="heading-bug">—</strong></div>
-          <div>
-            Spoons:
-            <strong id="fuel">—</strong>
-            <div class="fuel-track" aria-hidden="true">
-              <div id="fuel-bar" class="fuel-bar"></div>
-            </div>
+      <div id="instruments-body" class="instruments-body">
+        <div class="panel panel-primary">
+          <h2>Choose a night</h2>
+          <div id="progress-summary" class="progress-summary"></div>
+          <div
+            id="chapter-list"
+            class="chapter-list"
+            role="listbox"
+            aria-label="Guided night chapters"
+          ></div>
+          <h2 class="panel-subhead">Whisper</h2>
+          <p id="whisper" class="whisper">Warming the glass…</p>
+          <div class="row controls-row">
+            <button type="button" class="primary" id="btn-begin">Begin night</button>
+            <button type="button" id="btn-next" disabled>Next heading</button>
+            <button type="button" id="btn-skip" disabled>Skip fix</button>
+            <button type="button" id="btn-rest" disabled>Rest</button>
+            <button type="button" id="btn-pin" disabled title="P">Pin / Claim ✦</button>
+            <button type="button" id="btn-end" disabled>Closeout</button>
           </div>
-          <div>Wonder score: <strong id="score">0</strong></div>
-          <div>Pins discovered: <strong id="discovered">0</strong></div>
-          <div>Best wonder: <strong id="best-score">0</strong></div>
-          <div>Chapter best: <strong id="chapter-best">0</strong></div>
+          <label class="throttle">
+            Throttle (glide) · <kbd>↑</kbd><kbd>↓</kbd>
+            <input
+              id="throttle"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0.25"
+            />
+          </label>
         </div>
-        <h2 class="panel-subhead">Story ribbon</h2>
-        <ul id="pin-list" class="pin-list"></ul>
-        <h2 class="panel-subhead">House pins</h2>
-        <div id="house-pins" class="house-pins"></div>
-        <h2 class="panel-subhead">Nav log</h2>
-        <pre id="nav-log" class="nav-log">Nav log empty — soft start.</pre>
+
+        <div class="panel panel-secondary">
+          <h2>Soft instruments</h2>
+          <div class="meters">
+            <div>Heading bug: <strong id="heading-bug">—</strong></div>
+            <div>
+              Spoons:
+              <strong id="fuel">—</strong>
+              <div class="fuel-track" aria-hidden="true">
+                <div id="fuel-bar" class="fuel-bar"></div>
+              </div>
+            </div>
+            <div>Wonder score: <strong id="score">0</strong></div>
+            <div>Pins discovered: <strong id="discovered">0</strong></div>
+            <div>Best wonder: <strong id="best-score">0</strong></div>
+            <div>Chapter best: <strong id="chapter-best">0</strong></div>
+          </div>
+          <h2 class="panel-subhead">Story ribbon</h2>
+          <ul id="pin-list" class="pin-list"></ul>
+          <h2 class="panel-subhead">House pins</h2>
+          <div id="house-pins" class="house-pins"></div>
+          <h2 class="panel-subhead">Nav log</h2>
+          <pre id="nav-log" class="nav-log">Nav log empty — soft start.</pre>
+        </div>
       </div>
     </section>
 
