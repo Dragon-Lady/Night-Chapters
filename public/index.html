@@ -52,6 +52,25 @@
       <canvas id="fx-canvas" class="fx-canvas" aria-hidden="true"></canvas>
       <div class="sky-veil" aria-hidden="true"></div>
       <div class="reticle" aria-hidden="true"></div>
+      <!-- Always-visible flight controls (when panel collapsed, still clickable) -->
+      <div
+        id="flight-bar"
+        class="flight-bar"
+        hidden
+        aria-hidden="true"
+        role="toolbar"
+        aria-label="Flight controls"
+      >
+        <button type="button" id="fb-throttle-down" title="Throttle down (S)">S −</button>
+        <span id="flight-throttle-readout" class="flight-thr">25%</span>
+        <button type="button" id="fb-throttle-up" title="Throttle up (W)">W +</button>
+        <button type="button" id="fb-next" title="Next heading (N)">Next</button>
+        <button type="button" id="fb-rest" title="Rest (Space)">Rest</button>
+        <button type="button" id="fb-panel" title="Toggle panel ([)">Panel</button>
+        <button type="button" id="fb-menu" class="fb-menu" title="Back to menu (Esc)">
+          Menu
+        </button>
+      </div>
     </div>
 
     <!-- Wonder reflection at closeout -->

@@ -60,9 +60,15 @@ import {
   toJson,
   buildExportPayload,
 } from "./export.js";
-import { setKeyHandler, rebindKeys, bindKeys, focusShell } from "./keys.js";
+import {
+  setKeyHandler,
+  rebindKeys,
+  bindKeys,
+  focusShell,
+  ensureKeySink,
+} from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.4.4";
+export const CORE_LOOP_VERSION = "1.4.5";
 
 const State = {
   BOOT: "BOOT",
@@ -207,6 +213,11 @@ export function startGame(ui) {
       if (next === State.MENU) audio.stopAmbient({ fade: 1.5 });
     }
     syncButtons();
+    try {
+      updateFlightBar();
+    } catch {
+      /* defined later; ignore at early setState */
+    }
   }
 
   function inFlightLike() {
@@ -373,23 +384,23 @@ export function startGame(ui) {
     if (!signed) return;
 
     const slider = el.throttle();
-    const cur = slider
-      ? Number(slider.value || 0)
-      : Number(session.throttle || 0);
+    const cur = Number(session.throttle || 0);
     const next = Math.max(0, Math.min(1, Math.round((cur + signed) * 100) / 100));
-    if (slider) {
-      slider.value = String(next);
-      // keep DOM range in sync for accessibility
-      slider.dispatchEvent(new Event("input", { bubbles: true }));
-    }
+    if (slider) slider.value = String(next);
+    // Avoid dispatchEvent('input') — can re-enter and fight Aladin focus
     setThrottle(session, next);
     if (state === State.REST && next > 0.04) leaveRestIfNeeded();
     if (session.resting && next > 0.04 && state !== State.REST) {
       session.resting = false;
     }
-    audio.setWind(session.resting ? 0 : next);
+    try {
+      audio.setWind(session.resting ? 0 : next);
+    } catch {
+      /* ignore */
+    }
     windshield.fx?.setThrottle(session.resting ? 0 : next);
     renderMeters();
+    updateFlightBar();
   }
 
   function setPanelCollapsed(collapsed) {
@@ -758,13 +769,13 @@ export function startGame(ui) {
     await waitFor(() => typeof A !== "undefined", 8000);
     windshield.boot();
     windshield.whenReady(() => {
-      // Re-bind after Aladin so we stay last / active for keyboard
-      rebindKeys();
+      // Keep original capture listener (first); only refresh handler + focus
       setKeyHandler(onKeyDown);
+      rebindKeys(); // focus shell only — does not remove capture listener
       windshield.applyChapterSky?.(night);
       setState(State.MENU);
       setWhisper(
-        `Choose a night, then Begin. Best wonder: ${loadBestScore()}. Loop ${CORE_LOOP_VERSION}. Keys: W/S throttle.`
+        `Choose a night, then Begin. Best wonder: ${loadBestScore()}. Esc = menu · W/S throttle.`
       );
       refreshOverlays();
       renderHousePins();
@@ -773,24 +784,45 @@ export function startGame(ui) {
       syncMuteButton();
       if (el.btnBegin()) el.btnBegin().disabled = false;
       renderMeters();
-      try {
-        document.body.focus({ preventScroll: true });
-      } catch {
-        /* ignore */
-      }
+      focusShell();
     });
     cancelAnimationFrame(raf);
     lastTs = 0;
     raf = requestAnimationFrame(tick);
   }
 
+  function armKeyboard(reason = "") {
+    bindKeys();
+    setKeyHandler(onKeyDown);
+    ensureKeySink();
+    focusShell();
+    if (reason) {
+      try {
+        window.__ncKeys = window.__ncKeys || {};
+        window.__ncKeys.lastArm = reason;
+        window.__ncKeys.state = state;
+        window.__ncKeys.hasSession = !!session;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   function beginFlight() {
     loadNight(selectedNightId).then(async (n) => {
       night = n;
       windshield.applyChapterSky?.(night);
-      await audio.unlock();
-      audio.setChapterMood(chapterMood());
-      audio.startAmbient(chapterMood());
+      try {
+        await audio.unlock();
+      } catch {
+        /* audio optional */
+      }
+      try {
+        audio.setChapterMood(chapterMood());
+        audio.startAmbient(chapterMood());
+      } catch {
+        /* ignore */
+      }
       session = createFlightSession(night);
       session.startedAt = Date.now();
       const T = session.scoreTable || scoreTable(night);
@@ -804,23 +836,40 @@ export function startGame(ui) {
       setThrottle(session, t0);
       const first = night.pins[0]?.view;
       if (first) windshield.goto(first, { hard: true });
+      // Arm keys BEFORE setState (which auto-collapses panel)
+      armKeyboard("pre-flight");
       setState(State.FLIGHT);
       setWhisper(
         night.whisper_start ||
-          "Glide when ready. W/S or ↑↓ throttle · Space rest · watch for ✧ glows."
+          "Glide: W/S throttle · Space rest · Esc menu · use flight bar if keys lag."
       );
-      // Keep keyboard path live after Aladin interactions
-      rebindKeys();
-      setKeyHandler(onKeyDown);
-      try {
-        document.body.focus({ preventScroll: true });
-      } catch {
-        /* ignore */
-      }
+      armKeyboard("post-flight");
+      // Aladin may steal focus on first paint — reclaim repeatedly
+      [0, 50, 150, 400, 1000].forEach((ms) => {
+        setTimeout(() => armKeyboard(`t+${ms}`), ms);
+      });
       refreshOverlays();
       renderHousePins();
       renderMeters();
+      updateFlightBar();
     });
+  }
+
+  function updateFlightBar() {
+    const bar = document.getElementById("flight-bar");
+    if (!bar) return;
+    const show =
+      !!session &&
+      (state === State.FLIGHT ||
+        state === State.ARRIVE ||
+        state === State.MYSTERY ||
+        state === State.REST);
+    bar.hidden = !show;
+    bar.setAttribute("aria-hidden", show ? "false" : "true");
+    const thr = document.getElementById("flight-throttle-readout");
+    if (thr && session) {
+      thr.textContent = `${Math.round((session.throttle || 0) * 100)}%`;
+    }
   }
 
   function nextHeading() {
@@ -1122,15 +1171,42 @@ export function startGame(ui) {
     togglePanel();
   });
 
+  /** Soft abort flight → MENU (no forced closeout reflection) */
+  function abortToMenu() {
+    hideReflection();
+    showHelp(false);
+    showExport(false);
+    if (session) {
+      session.endedAt = Date.now();
+      session.navLog.push("Aborted to menu (Esc)");
+    }
+    try {
+      audio.setWind(0);
+      audio.stopAmbient({ fade: 0.8 });
+    } catch {
+      /* ignore */
+    }
+    windshield.setMotionBlur?.(0);
+    session = null;
+    setState(State.MENU);
+    setPanelCollapsed(false);
+    setWhisper("Back to nights. Pick a chapter or Begin. (Esc anytime in flight)");
+    refreshOverlays();
+    renderHousePins();
+    renderChapterMenu();
+    renderProgress();
+    renderMeters();
+    updateFlightBar();
+    armKeyboard("abort-menu");
+  }
+
   /**
-   * Flight / menu keys. Registered via keys.js (capture + bubble, deduped)
-   * and re-bound after Aladin boots so the canvas cannot steal input.
-   *
+   * Flight / menu keys via keys.js capture (bound before Aladin).
    * Throttle: W / ↑ = up · S / ↓ = down (step 0.1)
-   * Skip fix: X
+   * Skip: X · Esc: overlays first, else back to menu
    */
   function onKeyDown(e) {
-    if (e.defaultPrevented) return;
+    // Do NOT bail on defaultPrevented — Aladin may mark events after us
 
     const tag = (e.target && e.target.tagName) || "";
     const type = (e.target && e.target.type) || "";
@@ -1148,7 +1224,18 @@ export function startGame(ui) {
     const k = e.key || "";
     const flying = !!(session && ACTIVE.has(state));
 
-    // Throttle — highest priority while a night is active
+    // Reclaim focus from Aladin canvas on any flight key
+    if (flying || state === State.MENU || state === State.CLOSEOUT) {
+      if (tag === "CANVAS") {
+        try {
+          e.target.blur();
+        } catch {
+          /* ignore */
+        }
+        focusShell();
+      }
+    }
+
     const throttleUp =
       k === "w" ||
       k === "W" ||
@@ -1164,7 +1251,6 @@ export function startGame(ui) {
 
     if (flying && (throttleUp || throttleDown)) {
       e.preventDefault();
-      // do not stopImmediatePropagation — keys.js already dedupes
       nudgeThrottle(throttleUp ? 1 : -1, { repeat: !!e.repeat });
       return;
     }
@@ -1187,10 +1273,22 @@ export function startGame(ui) {
     }
     if (k === "Escape") {
       e.preventDefault();
-      showHelp(false);
-      showExport(false);
-      if (document.body.classList.contains("reflection-open")) {
+      // Close overlays first; then leave flight to menu
+      const helpOpen = el.helpScreen() && !el.helpScreen().hidden;
+      const exportOpen = el.exportScreen() && !el.exportScreen().hidden;
+      const reflectionOpen = document.body.classList.contains("reflection-open");
+      if (helpOpen || exportOpen) {
+        showHelp(false);
+        showExport(false);
+        return;
+      }
+      if (reflectionOpen) {
         hideReflection();
+        setWhisper("Ready when you are — pick a night or Begin again.");
+        return;
+      }
+      if (ACTIVE.has(state) || state === State.CLOSEOUT) {
+        abortToMenu();
       }
       return;
     }
@@ -1260,16 +1358,43 @@ export function startGame(ui) {
     }
   }
 
-  // Attach immediately (keys.js also binds at import time)
-  bindKeys();
-  setKeyHandler(onKeyDown);
+  // Attach once before Aladin.aladin() — do not tear down later
+  armKeyboard("init");
 
-  // Focus shell so keys aren't stuck on a dead target after clicks on canvas
-  try {
-    document.body.tabIndex = -1;
-  } catch {
-    /* ignore */
-  }
+  // Any pointer on page reclaims keyboard focus from Aladin
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      armKeyboard("pointer");
+    },
+    true
+  );
+
+  // Always-visible flight bar buttons (panel may be collapsed)
+  document.getElementById("fb-next")?.addEventListener("click", () => {
+    armKeyboard("fb-next");
+    nextHeading();
+  });
+  document.getElementById("fb-rest")?.addEventListener("click", () => {
+    armKeyboard("fb-rest");
+    rest();
+  });
+  document.getElementById("fb-throttle-up")?.addEventListener("click", () => {
+    armKeyboard("fb-up");
+    nudgeThrottle(1);
+  });
+  document.getElementById("fb-throttle-down")?.addEventListener("click", () => {
+    armKeyboard("fb-down");
+    nudgeThrottle(-1);
+  });
+  document.getElementById("fb-menu")?.addEventListener("click", () => {
+    armKeyboard("fb-menu");
+    abortToMenu();
+  });
+  document.getElementById("fb-panel")?.addEventListener("click", () => {
+    armKeyboard("fb-panel");
+    togglePanel();
+  });
 
   boot();
 

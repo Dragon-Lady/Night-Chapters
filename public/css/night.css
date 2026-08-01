@@ -194,6 +194,64 @@ header .tagline {
   height: 100%;
 }
 
+/* Invisible keyboard focus target — never blocks clicks */
+.nc-key-sink {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  z-index: 1;
+  pointer-events: none;
+  outline: none;
+}
+
+/* On-glass flight toolbar — always clickable during flight */
+.flight-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 0.65rem;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(5, 8, 16, 0.78);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  max-width: calc(100% - 1rem);
+}
+
+.flight-bar[hidden] {
+  display: none !important;
+}
+
+.flight-bar button {
+  font-size: 0.72rem;
+  padding: 0.35rem 0.65rem;
+  min-height: 1.85rem;
+}
+
+.flight-bar .fb-menu {
+  border-color: rgba(232, 213, 163, 0.45);
+  color: var(--glow);
+}
+
+.flight-thr {
+  font-size: 0.72rem;
+  color: var(--signal);
+  min-width: 2.5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .sky-veil {
   pointer-events: none;
   position: absolute;
@@ -859,7 +917,7 @@ kbd {
 }
 
 @media (min-width: 900px) {
-  .instruments {
+  .instruments-body {
     grid-template-columns: 1.35fr 1fr;
   }
 }
@@ -886,8 +944,15 @@ kbd {
   }
 
   .instruments {
-    max-height: min(48dvh, 380px);
-    padding: 0.45rem 0.5rem 0.65rem;
+    max-height: min(32dvh, 260px);
+  }
+
+  body.panel-collapsed .instruments {
+    max-height: 2.6rem;
+  }
+
+  .instruments-body {
+    padding: 0.4rem 0.5rem 0.55rem;
   }
 
   .panel {
