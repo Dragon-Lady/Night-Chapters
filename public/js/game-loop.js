@@ -60,9 +60,9 @@ import {
   toJson,
   buildExportPayload,
 } from "./export.js";
-import { setKeyHandler, rebindKeys, bindKeys } from "./keys.js";
+import { setKeyHandler, rebindKeys, bindKeys, focusShell } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.4.3";
+export const CORE_LOOP_VERSION = "1.4.4";
 
 const State = {
   BOOT: "BOOT",
@@ -758,10 +758,13 @@ export function startGame(ui) {
     await waitFor(() => typeof A !== "undefined", 8000);
     windshield.boot();
     windshield.whenReady(() => {
+      // Re-bind after Aladin so we stay last / active for keyboard
+      rebindKeys();
+      setKeyHandler(onKeyDown);
       windshield.applyChapterSky?.(night);
       setState(State.MENU);
       setWhisper(
-        `Choose a night, then Begin. Best wonder: ${loadBestScore()}. Loop ${CORE_LOOP_VERSION}.`
+        `Choose a night, then Begin. Best wonder: ${loadBestScore()}. Loop ${CORE_LOOP_VERSION}. Keys: W/S throttle.`
       );
       refreshOverlays();
       renderHousePins();
@@ -770,6 +773,11 @@ export function startGame(ui) {
       syncMuteButton();
       if (el.btnBegin()) el.btnBegin().disabled = false;
       renderMeters();
+      try {
+        document.body.focus({ preventScroll: true });
+      } catch {
+        /* ignore */
+      }
     });
     cancelAnimationFrame(raf);
     lastTs = 0;
@@ -799,8 +807,16 @@ export function startGame(ui) {
       setState(State.FLIGHT);
       setWhisper(
         night.whisper_start ||
-          "Glide when ready. Throttle to fly · Space to rest · watch for ✧ glows."
+          "Glide when ready. W/S or ↑↓ throttle · Space rest · watch for ✧ glows."
       );
+      // Keep keyboard path live after Aladin interactions
+      rebindKeys();
+      setKeyHandler(onKeyDown);
+      try {
+        document.body.focus({ preventScroll: true });
+      } catch {
+        /* ignore */
+      }
       refreshOverlays();
       renderHousePins();
       renderMeters();
