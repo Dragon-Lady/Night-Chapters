@@ -1,9 +1,9 @@
 /**
  * Windshield — custom canvas night sky (no Aladin).
  *
- * Camera: RA / Dec / FoV + flight heading (bearing on the sky).
- * Every rAF: steer (A/D · ←/→) turns heading; throttle (W/S) moves along it.
- * You can turn around and fly back to passed pins.
+ * Camera: RA / Dec / FoV + heading. Projection is heading-aligned:
+ *   forward (heading) = up on glass, so A/D yaws the whole sky.
+ * Throttle translates cam along heading; world anchors slide correctly.
  */
 
 const BOOT = {
@@ -264,23 +264,56 @@ export function createWindshield(
   }
 
   /**
-   * Project RA/Dec onto screen pixels relative to cam.
-   * Returns null if far outside the glass (with soft margin).
+   * Project RA/Dec → screen. Heading-aligned:
+   *   sky "forward" (heading) maps to UP on the glass,
+   *   sky "right" (heading−90°) maps to RIGHT.
+   * So changing heading yaws the entire sky (not only the HUD dial).
    */
   function project(ra, dec) {
     const fov = Math.max(2, cam.fov);
     const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
-    const dRa = wrapDeltaRa(ra - cam.ra) * cos;
-    const dDec = dec - cam.dec;
-    const scale = w / fov; // px per degree horizontal
-    const x = w * 0.5 + dRa * scale;
-    const y = h * 0.5 - dDec * scale;
-    // Keep projecting well outside glass so stars stream onto screen
+    // Local sky plane offsets in degrees (east, north)
+    const east = wrapDeltaRa(ra - cam.ra) * cos;
+    const north = dec - cam.dec;
+
+    const rad = (heading * Math.PI) / 180;
+    // Forward unit in (east, north): heading 0° = east, 90° = north
+    const fwdE = Math.cos(rad);
+    const fwdN = Math.sin(rad);
+    // Right = forward rotated −90°: (sin, −cos)
+    const rightE = Math.sin(rad);
+    const rightN = -Math.cos(rad);
+
+    const alongRight = east * rightE + north * rightN;
+    const alongFwd = east * fwdE + north * fwdN;
+
+    const scale = w / fov;
+    // Screen: +x right, +y down → forward is −y
+    const x = w * 0.5 + alongRight * scale;
+    const y = h * 0.5 - alongFwd * scale;
+
     const margin = Math.max(w, h) * 0.85;
     if (x < -margin || x > w + margin || y < -margin || y > h + margin) {
       return null;
     }
-    return { x, y, scale, dRa, dDec };
+    return { x, y, scale, east, north, alongRight, alongFwd };
+  }
+
+  /** Convert a sky-plane (east,north) delta to screen pixels (same rotation as project). */
+  function skyDeltaToScreen(eastDeg, northDeg) {
+    const fov = Math.max(2, cam.fov);
+    const scale = Math.max(1, w) / fov;
+    const rad = (heading * Math.PI) / 180;
+    const fwdE = Math.cos(rad);
+    const fwdN = Math.sin(rad);
+    const rightE = Math.sin(rad);
+    const rightN = -Math.cos(rad);
+    const alongRight = eastDeg * rightE + northDeg * rightN;
+    const alongFwd = eastDeg * fwdE + northDeg * fwdN;
+    return {
+      dx: alongRight * scale,
+      dy: -alongFwd * scale,
+    };
   }
 
   function isFlightPhase() {
@@ -421,16 +454,19 @@ export function createWindshield(
     const dt = Math.min(0.05, Math.max(0.001, Number(dtRaw) || 0.016));
     const t = throttle;
     const steer = Math.max(-1, Math.min(1, steerInput || 0));
+    const prevHeading = heading;
 
-    // —— Yaw: rate × dt, hard per-frame cap ——
+    // —— Yaw: updates heading (view rotation via project()) ——
+    let yawApplied = 0;
     if (Math.abs(steer) > 0.02) {
       let yaw = steer * MAX_YAW_DEG_PER_SEC * dt;
       if (yaw > MAX_YAW_DEG_PER_FRAME) yaw = MAX_YAW_DEG_PER_FRAME;
       if (yaw < -MAX_YAW_DEG_PER_FRAME) yaw = -MAX_YAW_DEG_PER_FRAME;
+      yawApplied = yaw;
       heading = (heading + yaw + 360) % 360;
     }
 
-    // —— Throttle: translate along current heading (slow crawl at ~5%) ——
+    // —— Throttle: translate cam along heading (after yaw this frame) ——
     const tCurve = Math.pow(Math.max(0, Math.min(1, t)), THROTTLE_CURVE);
     const maxDegPerSec =
       t <= 0.02
@@ -456,31 +492,36 @@ export function createWindshield(
       let nRa = cam.ra + dRa;
       let nDec = cam.dec + dDec;
       nRa = ((nRa % 360) + 360) % 360;
-      // Soft pole clamp — reverse only the Dec component of heading, not full flip
-      if (nDec > 89.5) {
-        nDec = 89.5;
-        dDec = 0;
-      } else if (nDec < -89.5) {
-        nDec = -89.5;
-        dDec = 0;
-      }
+      if (nDec > 89.5) nDec = 89.5;
+      else if (nDec < -89.5) nDec = -89.5;
       cam.ra = nRa;
       cam.dec = nDec;
     }
 
+    // Screen-space velocity for streaks / dust (heading-aligned)
     const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
     const dRaMove = wrapDeltaRa(cam.ra - prevRa);
     const dDecMove = cam.dec - prevDec;
-    const scale = Math.max(1, w) / Math.max(2, cam.fov);
-    const dxPx = -dRaMove * cosFx * scale;
-    const dyPx = dDecMove * scale;
+    const eastMove = dRaMove * cosFx;
+    const northMove = dDecMove;
+    // Features move opposite camera translation
+    let scr = skyDeltaToScreen(-eastMove, -northMove);
+    // Pure yaw also spins the field: approximate with tangential dust motion
+    if (Math.abs(yawApplied) > 0.001) {
+      const yawRad = (yawApplied * Math.PI) / 180;
+      // Screen-space swirl (counter-rotate with yaw so FOV feels locked to nose)
+      const swirl = Math.min(w, h) * 0.35 * yawRad;
+      scr = { dx: scr.dx + swirl, dy: scr.dy };
+    }
+    const dxPx = scr.dx;
+    const dyPx = scr.dy;
     dustOx = (dustOx + dxPx) % 256;
     dustOy = (dustOy + dyPx) % 256;
     if (dt > 0) {
       panVelX = panVelX * 0.25 + (dxPx / dt) * 0.75;
       panVelY = panVelY * 0.25 + (dyPx / dt) * 0.75;
     }
-    const movedDeg = Math.hypot(dRaMove * cosFx, dDecMove);
+    const movedDeg = Math.hypot(eastMove, northMove);
     lastAdvanceAt = performance.now();
     return {
       dRa: dRaMove,
@@ -489,6 +530,8 @@ export function createWindshield(
       dxPx,
       dyPx,
       heading,
+      prevHeading,
+      yawApplied,
       steer,
     };
   }
@@ -530,45 +573,46 @@ export function createWindshield(
     drawVignette();
   }
 
-  /** Compass / heading pip — makes A/D turns obvious */
+  /**
+   * Nose is always UP on the glass (heading-aligned projection).
+   * HUD is a fixed forward pip + heading readout.
+   */
   function drawHeadingHud() {
     if (!isFlightPhase()) return;
     const cx = w * 0.5;
     const cy = h * 0.5;
-    const rad = (heading * Math.PI) / 180;
-    // Screen: +x right, +y down. Sky: 0°=+RA (right on screen when facing north…),
-    // map heading so 90° (north/+Dec) points up (negative y).
-    const len = Math.min(w, h) * 0.12;
-    const sx = Math.cos(rad - Math.PI / 2);
-    const sy = Math.sin(rad - Math.PI / 2);
+    const len = Math.min(w, h) * 0.1;
 
     ctx.save();
     // Outer ring
-    ctx.strokeStyle = "rgba(158, 201, 255, 0.35)";
+    ctx.strokeStyle = "rgba(158, 201, 255, 0.3)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(cx, cy, len + 8, 0, Math.PI * 2);
+    ctx.arc(cx, cy, len + 10, 0, Math.PI * 2);
     ctx.stroke();
-    // Nose line
-    ctx.strokeStyle = "rgba(232, 213, 163, 0.85)";
+    // Forward always up
+    ctx.strokeStyle = "rgba(232, 213, 163, 0.9)";
+    ctx.fillStyle = "rgba(232, 213, 163, 0.9)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + sx * len, cy + sy * len);
+    ctx.moveTo(cx, cy + 4);
+    ctx.lineTo(cx, cy - len);
     ctx.stroke();
-    // Tip
-    ctx.fillStyle = "rgba(232, 213, 163, 0.95)";
+    // Arrow tip
     ctx.beginPath();
-    ctx.arc(cx + sx * len, cy + sy * len, 3.5, 0, Math.PI * 2);
+    ctx.moveTo(cx, cy - len - 2);
+    ctx.lineTo(cx - 5, cy - len + 8);
+    ctx.lineTo(cx + 5, cy - len + 8);
+    ctx.closePath();
     ctx.fill();
     // Label
     ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = "rgba(220, 232, 255, 0.75)";
+    ctx.fillStyle = "rgba(220, 232, 255, 0.8)";
     ctx.textAlign = "center";
-    ctx.fillText(`hdg ${Math.round(heading)}°`, cx, cy + len + 28);
+    ctx.fillText(`hdg ${Math.round(heading)}° · nose up`, cx, cy + len + 26);
     if (Math.abs(steerInput) > 0.02) {
-      ctx.fillStyle = "rgba(255, 215, 138, 0.85)";
-      ctx.fillText(steerInput > 0 ? "→ turn" : "← turn", cx, cy + len + 42);
+      ctx.fillStyle = "rgba(255, 215, 138, 0.9)";
+      ctx.fillText(steerInput > 0 ? "yaw →" : "← yaw", cx, cy + len + 40);
     }
     ctx.restore();
   }
@@ -651,56 +695,72 @@ export function createWindshield(
   }
 
   function drawMilkyBand() {
-    const fov = Math.max(2, cam.fov);
-    const scale = w / fov;
-    const bandDec = 20;
-    const y0 = h * 0.5 - (bandDec - cam.dec) * scale * 0.55;
-    const xShift = -wrapDeltaRa(cam.ra - 90) * scale * 0.08;
-    const tilt = Math.sin((cam.ra * Math.PI) / 180) * 0.18;
-
+    // Band along dec≈20°, projected with heading so it yaws with the sky
+    const samples = 24;
     ctx.save();
-    ctx.translate(w * 0.5 + xShift, y0);
-    ctx.rotate(tilt);
-    const band = ctx.createLinearGradient(0, -h * 0.18, 0, h * 0.18);
-    const a = weatherMood === "cold" ? 0.18 : 0.14;
-    band.addColorStop(0, "rgba(180,200,255,0)");
-    band.addColorStop(0.5, `rgba(200, 210, 255, ${a})`);
-    band.addColorStop(1, "rgba(180,200,255,0)");
-    ctx.fillStyle = band;
-    ctx.fillRect(-w * 1.2, -h * 0.22, w * 2.4, h * 0.44);
+    ctx.strokeStyle =
+      weatherMood === "cold"
+        ? "rgba(200, 215, 255, 0.14)"
+        : "rgba(200, 210, 255, 0.11)";
+    ctx.lineWidth = Math.max(18, Math.min(w, h) * 0.06);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= samples; i++) {
+      const ra = cam.ra - 40 + (i / samples) * 80;
+      const p = project(ra, 20);
+      if (!p) continue;
+      if (!started) {
+        ctx.moveTo(p.x, p.y);
+        started = true;
+      } else ctx.lineTo(p.x, p.y);
+    }
+    if (started) ctx.stroke();
     ctx.restore();
   }
 
-  /** Faint RA/Dec grid — makes pan/turn obvious */
+  /** Faint RA/Dec grid — lines rotate with heading via project() */
   function drawCoordGrid() {
     const fov = Math.max(2, cam.fov);
-    const scale = w / fov;
     const step = fov > 12 ? 10 : fov > 6 ? 5 : 2;
     ctx.save();
-    ctx.strokeStyle = "rgba(140, 170, 220, 0.12)";
+    ctx.strokeStyle = "rgba(140, 170, 220, 0.14)";
     ctx.lineWidth = 1;
-    // Vertical lines = constant RA
-    const ra0 = Math.floor(cam.ra / step) * step - step * 4;
-    for (let i = 0; i < 12; i++) {
+    // Constant-RA meridians
+    const ra0 = Math.floor(cam.ra / step) * step - step * 5;
+    for (let i = 0; i < 14; i++) {
       const ra = ra0 + i * step;
-      const p = project(ra, cam.dec);
-      if (!p) continue;
       ctx.beginPath();
-      ctx.moveTo(p.x, 0);
-      ctx.lineTo(p.x, h);
-      ctx.stroke();
+      let started = false;
+      for (let j = 0; j <= 12; j++) {
+        const dec = cam.dec - step * 6 + j * step;
+        if (dec < -90 || dec > 90) continue;
+        const p = project(ra, dec);
+        if (!p) continue;
+        if (!started) {
+          ctx.moveTo(p.x, p.y);
+          started = true;
+        } else ctx.lineTo(p.x, p.y);
+      }
+      if (started) ctx.stroke();
     }
-    // Horizontal lines = constant Dec
-    const dec0 = Math.floor(cam.dec / step) * step - step * 4;
-    for (let i = 0; i < 12; i++) {
+    // Constant-Dec parallels
+    const dec0 = Math.floor(cam.dec / step) * step - step * 5;
+    for (let i = 0; i < 14; i++) {
       const dec = dec0 + i * step;
       if (dec < -90 || dec > 90) continue;
-      const p = project(cam.ra, dec);
-      if (!p) continue;
       ctx.beginPath();
-      ctx.moveTo(0, p.y);
-      ctx.lineTo(w, p.y);
-      ctx.stroke();
+      let started = false;
+      for (let j = 0; j <= 12; j++) {
+        const ra = cam.ra - step * 6 + j * step;
+        const p = project(ra, dec);
+        if (!p) continue;
+        if (!started) {
+          ctx.moveTo(p.x, p.y);
+          started = true;
+        } else ctx.lineTo(p.x, p.y);
+      }
+      if (started) ctx.stroke();
     }
     ctx.restore();
   }
