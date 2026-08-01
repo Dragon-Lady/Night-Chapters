@@ -25,7 +25,7 @@ npm start
 1. Wait for the **canvas sky glass**.  
 2. **Choose a night** (or press `1`–`4`).  
 3. **Begin night** (`Enter` / `B`) — soft ambient starts.  
-4. Raise **throttle** (`W`/`S` or `↑`/`↓`) — stars and scenery glide toward the heading bug; **spoons** drain.  
+4. Raise **throttle** (`W`/`S` or `↑`/`↓`) and **steer** (`A`/`D` or `←`/`→`) — fly free on the sky; **spoons** drain.  
 5. **`Space`** — rest; spoons recover; silence.  
 6. On a story pin — read the whisper · **`N`** next · **`X`** skip (allowed).  
 7. Near **✧** drift or **✦** chapter mystery — **`P`** to name it (saved to house pins + score).  
@@ -42,7 +42,9 @@ npm start
 | `Enter` / `B` | Begin night |
 | `W` / `↑` | Throttle up (+0.1) |
 | `S` / `↓` | Throttle down (−0.1) |
-| `N` | Next heading |
+| `A` / `←` | Steer left |
+| `D` / `→` | Steer right |
+| `N` | Face next heading |
 | `X` | Skip fix |
 | `Space` | Rest |
 | `P` | Pin / claim |

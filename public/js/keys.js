@@ -9,6 +9,7 @@
  */
 
 let userHandler = null;
+let userKeyUpHandler = null;
 const seen = new WeakSet();
 
 function dispatch(e) {
@@ -19,6 +20,16 @@ function dispatch(e) {
       userHandler(e);
     } catch (err) {
       console.error("[NC keys]", err);
+    }
+  }
+}
+
+function dispatchUp(e) {
+  if (typeof userKeyUpHandler === "function") {
+    try {
+      userKeyUpHandler(e);
+    } catch (err) {
+      console.error("[NC keys up]", err);
     }
   }
 }
@@ -34,15 +45,18 @@ export function bindKeys() {
   document.addEventListener("keydown", dispatch, opts);
   // bubble backup (deduped)
   window.addEventListener("keydown", dispatch, false);
+  // keyup for held steer (A/D · arrows)
+  window.addEventListener("keyup", dispatchUp, opts);
+  document.addEventListener("keyup", dispatchUp, opts);
 }
 
 export function setKeyHandler(fn) {
   userHandler = fn;
   bindKeys();
-  // expose for console diagnosis: window.__ncKeyHandlerAlive
   try {
     window.__ncKeys = {
       hasHandler: !!userHandler,
+      hasKeyUp: !!userKeyUpHandler,
       bound,
       focusShell,
       ping: () => "nc-keys-alive",
@@ -50,6 +64,11 @@ export function setKeyHandler(fn) {
   } catch {
     /* ignore */
   }
+}
+
+export function setKeyUpHandler(fn) {
+  userKeyUpHandler = fn;
+  bindKeys();
 }
 
 /**
@@ -66,7 +85,7 @@ export function ensureKeySink() {
     sink.setAttribute("role", "application");
     sink.setAttribute(
       "aria-label",
-      "Night Chapters keyboard focus. W S throttle, Space rest, Esc menu."
+      "Night Chapters keyboard. W S throttle, A D steer, Space rest, Esc menu."
     );
     sink.className = "nc-key-sink";
     document.body.appendChild(sink);

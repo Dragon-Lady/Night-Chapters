@@ -3,7 +3,7 @@
  *
  * BOOT → MENU → FLIGHT ⇄ ARRIVE ⇄ MYSTERY ⇄ REST → CLOSEOUT → MENU
  *
- * FLIGHT: throttle glide toward heading bug; spoon fuel drains while moving.
+ * FLIGHT: throttle + steer (A/D · ←/→); spoon fuel drains while moving.
  * REST: Space / Rest button — throttle 0, spoons recover, no failure.
  * MYSTERY: drift glows mid-path + chapter mystery; P claims → personal pin + score.
  *
@@ -62,13 +62,14 @@ import {
 } from "./export.js";
 import {
   setKeyHandler,
+  setKeyUpHandler,
   rebindKeys,
   bindKeys,
   focusShell,
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.6.0";
+export const CORE_LOOP_VERSION = "1.6.1";
 
 const State = {
   BOOT: "BOOT",
@@ -359,6 +360,28 @@ export function startGame(ui) {
 
   const THROTTLE_STEP = 0.1;
   let lastThrottleKeyAt = 0;
+  /** Held steer keys — continuous yaw while flying */
+  const heldSteer = { left: false, right: false };
+
+  function syncSteerInput() {
+    const v = (heldSteer.right ? 1 : 0) - (heldSteer.left ? 1 : 0);
+    windshield.setSteer?.(v);
+  }
+
+  function clearSteer() {
+    heldSteer.left = false;
+    heldSteer.right = false;
+    windshield.setSteer?.(0);
+  }
+
+  /** Point nose at current waypoint (Begin / Next heading) */
+  function faceCurrentWaypoint() {
+    if (!night || !session) return;
+    const wp = currentWaypoint(night, session);
+    if (wp?.view && typeof windshield.faceToward === "function") {
+      windshield.faceToward(wp.view.ra, wp.view.dec);
+    }
+  }
 
   /**
    * @param {number} delta  + up / − down
@@ -558,13 +581,22 @@ export function startGame(ui) {
     const wp = night && session ? currentWaypoint(night, session) : null;
     if (el.heading()) {
       let h = "—";
+      const bearing =
+        typeof windshield.getHeading === "function"
+          ? Math.round(windshield.getHeading())
+          : null;
+      const br = bearing != null ? ` · hdg ${bearing}°` : "";
       if (session?.activeDriftId) {
         const d = session.driftMysteries.find(
           (m) => m.id === session.activeDriftId
         );
-        h = d ? `✧ ${d.claimed_label || "drift glow"}` : h;
+        h = d ? `✧ ${d.claimed_label || "drift glow"}${br}` : h;
       } else if (wp) {
-        h = wp.kind === "mystery" ? "✦ chapter mystery" : wp.pin.label;
+        const label =
+          wp.kind === "mystery" ? "✦ chapter mystery" : wp.pin.label;
+        h = `${label}${br}`;
+      } else if (bearing != null) {
+        h = `hdg ${bearing}°`;
       }
       el.heading().textContent = h;
     }
@@ -720,26 +752,31 @@ export function startGame(ui) {
       }
     }
 
-    // FLIGHT + MYSTERY: live glide — throttle drives canvas sky every rAF
+    // FLIGHT + MYSTERY: steer (A/D) + throttle (W/S) every rAF
     const thr = Number(session.throttle || 0);
-    const canGlide =
-      (state === State.FLIGHT || state === State.MYSTERY) &&
-      !session.resting &&
-      thr > 0.04 &&
-      session.spoons > 0.02;
+    syncSteerInput();
+    const flyingFree =
+      (state === State.FLIGHT || state === State.MYSTERY) && !session.resting;
+    const canGlide = flyingFree && thr > 0.04 && session.spoons > 0.02;
+    const steering =
+      flyingFree && (heldSteer.left || heldSteer.right);
 
-    if (canGlide) {
+    if (canGlide || steering) {
       const wp = currentWaypoint(night, session);
-      // No waypoint left → closeout, but still nudge sky if somehow mid-flight
-      if (!wp) {
-        // Final cruise step so last throttle still moves glass, then close
-        windshield.glideStep(null, thr, dt);
-        beginCloseout();
+      // Every rAF: yaw from steer, move along heading from throttle
+      const step = windshield.glideStep(wp?.view || null, thr, dt);
+
+      // Steer-only (idle throttle): still update instruments, no arrival checks
+      if (!canGlide) {
+        renderMeters();
+        updateFlightBar();
         return;
       }
 
-      // Every rAF: throttle delta → cam pan (stars + scenery move together)
-      const step = windshield.glideStep(wp.view, thr, dt);
+      if (!wp) {
+        beginCloseout();
+        return;
+      }
       windshield.fx?.setThrottle(thr);
       try {
         audio.setWind(thr);
@@ -842,6 +879,7 @@ export function startGame(ui) {
     windshield.whenReady(() => {
       // Keep original capture listener (first); only refresh handler + focus
       setKeyHandler(onKeyDown);
+      setKeyUpHandler(onKeyUp);
       rebindKeys(); // focus shell only — does not remove capture listener
       windshield.applyChapterSky?.(night);
       setState(State.MENU);
@@ -865,6 +903,7 @@ export function startGame(ui) {
   function armKeyboard(reason = "") {
     bindKeys();
     setKeyHandler(onKeyDown);
+    setKeyUpHandler(onKeyUp);
     ensureKeySink();
     focusShell();
     if (reason) {
@@ -930,14 +969,15 @@ export function startGame(ui) {
           session.pinIndex = 1;
         }
       }
-      // Kick sky once so Begin feels like motion starts immediately
+      // Face next story pin, then free-flight (steer + throttle)
+      faceCurrentWaypoint();
       applyThrottleToSky("begin");
       // Arm keys BEFORE setState (which auto-collapses panel)
       armKeyboard("pre-flight");
       setState(State.FLIGHT);
       setWhisper(
         night.whisper_start ||
-          "Throttle moves the sky — W/S or slider. Space rest · Esc menu."
+          "W/S throttle · A/D or ←/→ steer · fly free, turn back anytime. Space rest · Esc menu."
       );
       armKeyboard("post-flight");
       // Aladin may steal focus on first paint — reclaim repeatedly
@@ -999,10 +1039,11 @@ export function startGame(ui) {
       if (el.throttle()) el.throttle().value = String(session.throttle);
     }
     setState(State.FLIGHT);
+    faceCurrentWaypoint();
     setWhisper(
       wp.kind === "mystery"
         ? night.mystery.story_hook
-        : `Heading: ${wp.pin.label}`
+        : `Heading: ${wp.pin.label} · A/D to turn · W to fly`
     );
   }
 
@@ -1013,7 +1054,8 @@ export function startGame(ui) {
       session.navLog.push(`Skipped: ${wp.pin.label} (allowed · no score)`);
       session.pinIndex += 1;
       setState(State.FLIGHT);
-      setWhisper("Skipped. The night still counts.");
+      faceCurrentWaypoint();
+      setWhisper("Skipped. The night still counts. Steer free.");
       refreshOverlays();
       renderMeters();
     }
@@ -1309,6 +1351,7 @@ export function startGame(ui) {
     session = null;
     setState(State.MENU);
     setPanelCollapsed(false);
+    clearSteer();
     setWhisper("Back to nights. Pick a chapter or Begin. (Esc anytime in flight)");
     refreshOverlays();
     renderHousePins();
@@ -1319,14 +1362,45 @@ export function startGame(ui) {
     armKeyboard("abort-menu");
   }
 
+  function onKeyUp(e) {
+    const code = e.code || "";
+    const k = e.key || "";
+    if (isSteerLeft(k, code)) {
+      heldSteer.left = false;
+      syncSteerInput();
+    }
+    if (isSteerRight(k, code)) {
+      heldSteer.right = false;
+      syncSteerInput();
+    }
+  }
+
   /**
-   * Flight / menu keys via keys.js capture (bound before Aladin).
-   * Throttle: W / ↑ = up · S / ↓ = down (step 0.1)
+   * Flight / menu keys via keys.js capture.
+   * Throttle: W / ↑ · S / ↓
+   * Steer: A / ← left · D / → right (held = continuous yaw)
    * Skip: X · Esc: overlays first, else back to menu
    */
-  function onKeyDown(e) {
-    // Do NOT bail on defaultPrevented — Aladin may mark events after us
+  function isSteerLeft(k, code) {
+    return (
+      k === "a" ||
+      k === "A" ||
+      code === "KeyA" ||
+      k === "ArrowLeft" ||
+      code === "ArrowLeft"
+    );
+  }
+  function isSteerRight(k, code) {
+    return (
+      k === "d" ||
+      k === "D" ||
+      code === "KeyD" ||
+      k === "ArrowRight" ||
+      code === "ArrowRight"
+    );
+  }
 
+  function onKeyDown(e) {
     const tag = (e.target && e.target.tagName) || "";
     const type = (e.target && e.target.type) || "";
     const isTyping =
@@ -1343,7 +1417,6 @@ export function startGame(ui) {
     const k = e.key || "";
     const flying = !!(session && ACTIVE.has(state));
 
-    // Reclaim focus from Aladin canvas on any flight key
     if (flying || state === State.MENU || state === State.CLOSEOUT) {
       if (tag === "CANVAS") {
         try {
@@ -1353,6 +1426,15 @@ export function startGame(ui) {
         }
         focusShell();
       }
+    }
+
+    // Steer — held state; rAF applies continuous yaw
+    if (flying && (isSteerLeft(k, code) || isSteerRight(k, code))) {
+      e.preventDefault();
+      if (isSteerLeft(k, code)) heldSteer.left = true;
+      if (isSteerRight(k, code)) heldSteer.right = true;
+      syncSteerInput();
+      return;
     }
 
     const throttleUp =

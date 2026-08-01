@@ -1,21 +1,23 @@
 /**
  * Windshield — custom canvas night sky (no Aladin).
  *
- * Gentle procedural scenery: deep gradient, milky haze, starfield, weather
- * wisps, and pin markers. Camera is RA/Dec/FoV; throttle glide pans the sky
- * every frame so stars and scenery actually move with W/S.
- *
- * Public API matches the former Aladin windshield so game-loop is unchanged.
+ * Camera: RA / Dec / FoV + flight heading (bearing on the sky).
+ * Every rAF: steer (A/D · ←/→) turns heading; throttle (W/S) moves along it.
+ * You can turn around and fly back to passed pins.
  */
 
 const BOOT = {
   ra: 83.8221,
   dec: -5.3911,
   fov: 8.0,
+  /** Bearing on sky: 0° = +RA (east), 90° = +Dec (north) */
+  heading: 90,
 };
 
 const MAX_DEG_PER_SEC = 10;
 const MIN_DEG_PER_SEC = 1.4;
+/** Max yaw rate while holding A/D (°/s) */
+const MAX_YAW_DEG_PER_SEC = 75;
 const FIELD_STAR_N = 420;
 const NEAR_STAR_N = 90;
 const NEBULA_N = 7;
@@ -31,6 +33,10 @@ export function createWindshield(
   const waiters = [];
 
   let cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
+  /** Flight bearing degrees: 0 = +RA, 90 = +Dec */
+  let heading = BOOT.heading;
+  /** Continuous steer input −1..+1 (left/right held keys) */
+  let steerInput = 0;
   let lastGlideSpeed = 0;
   let w = 0;
   let h = 0;
@@ -506,14 +512,48 @@ export function createWindshield(
   // ——— Camera / flight API ———
 
   function getView() {
-    return { ra: cam.ra, dec: cam.dec, fov: cam.fov };
+    return { ra: cam.ra, dec: cam.dec, fov: cam.fov, heading };
   }
 
-  function goto(view, { hard = false } = {}) {
+  function getHeading() {
+    return heading;
+  }
+
+  /**
+   * Steer input −1 (left) … +1 (right). Held keys update every frame via game-loop.
+   */
+  function setSteer(v) {
+    const n = Number(v);
+    steerInput = Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0;
+  }
+
+  function getSteer() {
+    return steerInput;
+  }
+
+  /**
+   * Point flight heading toward a sky position (next pin / mystery).
+   */
+  function faceToward(ra, dec) {
+    if (!Number.isFinite(ra) || !Number.isFinite(dec)) return heading;
+    const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
+    const dRa = wrapDeltaRa(Number(ra) - cam.ra) * cos;
+    const dDec = Number(dec) - cam.dec;
+    if (Math.hypot(dRa, dDec) < 1e-6) return heading;
+    // atan2(dDec, dRa): 0 = +RA, 90 = +Dec
+    heading = ((Math.atan2(dDec, dRa) * 180) / Math.PI + 360) % 360;
+    publishCam();
+    return heading;
+  }
+
+  function goto(view, { hard = false, face = true } = {}) {
     if (!view) return;
     cam.ra = Number(view.ra);
     cam.dec = Number(view.dec);
     if (view.fov != null) cam.fov = Math.max(4, Number(view.fov));
+    if (view.heading != null && Number.isFinite(Number(view.heading))) {
+      heading = ((Number(view.heading) % 360) + 360) % 360;
+    }
     panVelX = 0;
     panVelY = 0;
     if (hard) {
@@ -530,6 +570,8 @@ export function createWindshield(
         ra: cam.ra,
         dec: cam.dec,
         fov: cam.fov,
+        heading,
+        steer: steerInput,
         ok: true,
         path: "canvas",
         t: performance.now(),
@@ -540,7 +582,8 @@ export function createWindshield(
   }
 
   /**
-   * Throttle-driven glide toward target. Updates cam; paint loop shows motion.
+   * Each rAF: apply steer (heading) + throttle (move along heading).
+   * `target` is still used for distance / arrival / optional FoV — not forced path.
    */
   function glideStep(target, thr = 0.35, dtSec = 1 / 60) {
     const t = Math.max(0, Math.min(1, Number(thr) || 0));
@@ -552,23 +595,32 @@ export function createWindshield(
       Number.isFinite(Number(target.ra)) &&
       Number.isFinite(Number(target.dec));
 
+    let dist = 0;
+    let dRaTo = 0;
+    let dDecTo = 0;
+    let bearingTo = null;
+    if (hasTarget) {
+      const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
+      dRaTo = wrapDeltaRa(Number(target.ra) - cam.ra) * cos;
+      dDecTo = Number(target.dec) - cam.dec;
+      dist = Math.hypot(dRaTo, dDecTo);
+      if (dist > 1e-6) {
+        bearingTo = ((Math.atan2(dDecTo, dRaTo) * 180) / Math.PI + 360) % 360;
+      }
+    }
+
+    // —— Steering: yaw heading from held A/D · ←/→ ——
+    const steer = Math.max(-1, Math.min(1, steerInput || 0));
+    if (Math.abs(steer) > 0.02) {
+      heading = (heading + steer * MAX_YAW_DEG_PER_SEC * dt + 360) % 360;
+    }
+
+    // —— Throttle: move along current heading (free flight) ——
     const maxDegPerSec =
       t <= 0.02
         ? 0
         : MIN_DEG_PER_SEC + t * (MAX_DEG_PER_SEC - MIN_DEG_PER_SEC);
-
-    let dist = 0;
-    let dRaTo = 0;
-    let dDecTo = 0;
-    if (hasTarget) {
-      dRaTo = wrapDeltaRa(Number(target.ra) - cam.ra);
-      dDecTo = Number(target.dec) - cam.dec;
-      const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
-      dist = Math.hypot(dRaTo * cos, dDecTo);
-    }
-
-    const approach = dist > 0 && dist < 2.5 ? Math.max(0.4, dist / 2.5) : 1;
-    const stepDeg = maxDegPerSec * approach * dt;
+    const stepDeg = maxDegPerSec * dt;
 
     const prevRa = cam.ra;
     const prevDec = cam.dec;
@@ -576,14 +628,13 @@ export function createWindshield(
     let dDec = 0;
 
     if (t > 0.02 && stepDeg > 0) {
-      if (hasTarget && dist > 1e-4) {
-        const move = Math.min(stepDeg, dist);
-        const u = move / dist;
-        dRa = dRaTo * u;
-        dDec = dDecTo * u;
-      } else if (!hasTarget) {
-        dRa = stepDeg * 0.35;
-      }
+      const rad = (heading * Math.PI) / 180;
+      // Local sky plane: +RA (east) · +Dec (north), RA scaled by cos(dec)
+      const cosDec = Math.cos((cam.dec * Math.PI) / 180) || 1;
+      const moveEast = Math.cos(rad) * stepDeg; // degrees of true sky angle east
+      const moveNorth = Math.sin(rad) * stepDeg;
+      dRa = cosDec !== 0 ? moveEast / cosDec : 0;
+      dDec = moveNorth;
     }
 
     if (dRa !== 0 || dDec !== 0) {
@@ -591,24 +642,29 @@ export function createWindshield(
       let nDec = cam.dec + dDec;
       nRa = ((nRa % 360) + 360) % 360;
       nDec = Math.max(-89.5, Math.min(89.5, nDec));
+      // Soft bounce near poles — reverse north/south component of heading
+      if (nDec !== cam.dec + dDec) {
+        heading = (360 - heading + 360) % 360;
+      }
       cam.ra = nRa;
       cam.dec = nDec;
     }
 
-    // Soft FoV toward target
+    // Soft FoV toward pin when near, else gentle cruise open
     if (hasTarget && target.fov != null && Number.isFinite(Number(target.fov))) {
       const tFov = Math.max(5.5, Number(target.fov));
-      cam.fov = cam.fov + (tFov - cam.fov) * Math.min(1, 0.45 * dt);
+      if (dist < 8) {
+        cam.fov = cam.fov + (tFov - cam.fov) * Math.min(1, 0.45 * dt);
+      }
     } else if (t > 0.04 && cam.fov < 8) {
       cam.fov = Math.min(10, cam.fov + 1.5 * dt);
     }
 
-    // Screen-space velocity for near-star parallax (same delta as scenery)
+    // Screen-space velocity for near-star parallax
     const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
     const dRaMove = wrapDeltaRa(cam.ra - prevRa);
     const dDecMove = cam.dec - prevDec;
     const scale = w / Math.max(2, cam.fov);
-    // Cam moves +RA → sky features slide left
     const dxPx = -dRaMove * cosFx * scale;
     const dyPx = dDecMove * scale;
     if (dt > 0) {
@@ -627,6 +683,12 @@ export function createWindshield(
     setMotionBlur(lastGlideSpeed);
     publishCam();
 
+    // Heading error vs bug (for instruments)
+    let headingErr = null;
+    if (bearingTo != null) {
+      headingErr = wrapDeltaRa(bearingTo - heading);
+    }
+
     try {
       window.__ncGlide = {
         dRa,
@@ -635,6 +697,10 @@ export function createWindshield(
         applied: true,
         dist,
         thr: t,
+        heading,
+        steer,
+        bearingTo,
+        headingErr,
         path: "canvas",
         dxPx,
         dyPx,
@@ -656,6 +722,10 @@ export function createWindshield(
       dDec,
       dxPx,
       dyPx,
+      heading,
+      steer,
+      bearingTo,
+      headingErr,
     };
   }
 
@@ -669,7 +739,7 @@ export function createWindshield(
       publishCam();
       return getView();
     }
-    return glideStep(target, Math.min(1, t + 0.2), Math.max(dtSec, 1 / 28));
+    return glideStep(target, Math.min(1, t + 0.15), Math.max(dtSec, 1 / 28));
   }
 
   function applyCam() {
@@ -789,6 +859,10 @@ export function createWindshield(
     boot,
     whenReady,
     getView,
+    getHeading,
+    setSteer,
+    getSteer,
+    faceToward,
     goto,
     glideStep,
     throttleKick,
@@ -808,7 +882,10 @@ export function createWindshield(
       return ready;
     },
     get cam() {
-      return { ...cam };
+      return { ...cam, heading };
+    },
+    get heading() {
+      return heading;
     },
   };
 }
