@@ -1,6 +1,6 @@
 /**
  * Windshield — Aladin Lite as the cockpit glass.
- * Smooth glide easing, glowing pin catalogs, sky mood hooks for FX layer.
+ * Throttle → glideStep → wasm.setCenter every frame so the sky actually moves.
  */
 
 import { createFxLayer } from "./fx-layer.js";
@@ -23,9 +23,10 @@ export function createWindshield(
   let mysteryCatalog = null;
   let fx = null;
 
-  // Smoothed camera state (lerp target for prettier motion)
+  // Internal camera — source of truth for continuous glide
   let cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
   let lastGlideSpeed = 0;
+  let lastApplyAt = 0;
 
   function whenReady(fn) {
     if (ready && aladin) fn(aladin);
@@ -58,20 +59,17 @@ export function createWindshield(
       fullScreen: false,
     });
 
+    // Expose for console diagnosis
     try {
-      if (typeof aladin.gotoRaDec === "function") {
-        aladin.gotoRaDec(BOOT.ra, BOOT.dec);
-      }
-      if (typeof aladin.setFov === "function") {
-        aladin.setFov(BOOT.fov);
-      }
-    } catch (e) {
-      console.warn("windshield boot nudge", e);
+      window.__aladin = aladin;
+      window.__ncCam = () => ({ ...cam });
+    } catch {
+      /* ignore */
     }
 
-    cam = { ...BOOT };
+    cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
+    applyCam(true);
 
-    // Glowing catalogs — larger soft markers
     try {
       if (typeof A.catalog === "function") {
         pinCatalog = A.catalog({
@@ -99,16 +97,19 @@ export function createWindshield(
       console.warn("catalog init", e);
     }
 
-    // FX layer (stars / clouds / veil)
     const fxEl = document.getElementById(fxCanvasId);
     if (fxEl) {
       fx = createFxLayer(fxEl);
       fx.start();
     }
 
-    // CSS glass polish
     const aladinDiv = document.querySelector(containerSelector);
-    if (aladinDiv) aladinDiv.classList.add("aladin-glass");
+    if (aladinDiv) {
+      aladinDiv.classList.add("aladin-glass");
+      // Never put CSS filter/transform on this node — freezes WebGL paints
+      aladinDiv.style.filter = "";
+      aladinDiv.style.transform = "";
+    }
     if (stage) {
       stage.classList.remove("glass-boot");
       stage.classList.add("glass-live");
@@ -119,138 +120,185 @@ export function createWindshield(
     return aladin;
   }
 
-  /**
-   * Read sky position. During active glide prefer internal cam — Aladin's
-   * getRaDec can lag or snap and cancel visual motion if trusted every frame.
-   */
   function getView({ syncFromAladin = false } = {}) {
-    if (!aladin) return { ...cam };
-    if (!syncFromAladin) {
+    if (!aladin || !syncFromAladin) {
       return { ra: cam.ra, dec: cam.dec, fov: cam.fov };
     }
-    let ra = cam.ra;
-    let dec = cam.dec;
-    let fov = cam.fov;
     try {
       if (typeof aladin.getRaDec === "function") {
         const rd = aladin.getRaDec();
-        if (Array.isArray(rd)) {
-          ra = rd[0];
-          dec = rd[1];
-        } else if (rd && typeof rd === "object") {
-          ra = rd.ra ?? rd[0] ?? ra;
-          dec = rd.dec ?? rd[1] ?? dec;
+        if (Array.isArray(rd) && Number.isFinite(rd[0])) {
+          cam.ra = Number(rd[0]);
+          cam.dec = Number(rd[1]);
         }
       }
       if (typeof aladin.getFov === "function") {
         const f = aladin.getFov();
-        fov = Array.isArray(f) ? f[0] : f || fov;
+        const v = Array.isArray(f) ? f[0] : f;
+        if (Number.isFinite(v)) cam.fov = Number(v);
       }
     } catch {
       /* keep cam */
     }
-    cam = { ra: Number(ra), dec: Number(dec), fov: Number(fov) };
     return { ...cam };
   }
 
-  function applyCam() {
-    if (!aladin) return;
+  /**
+   * Push cam into Aladin WASM view. Prefer view.pointTo (direct wasm.setCenter).
+   * @param {boolean} force  skip throttle
+   */
+  function applyCam(force = false) {
+    if (!aladin) return false;
+    const now = performance.now();
+    // Allow up to ~60 pushes/sec; always allow force
+    if (!force && now - lastApplyAt < 12) return false;
+    lastApplyAt = now;
+
+    const ra = Number(cam.ra);
+    const dec = Number(cam.dec);
+    const fov = Number(cam.fov);
+    if (!Number.isFinite(ra) || !Number.isFinite(dec)) return false;
+
+    let ok = false;
     try {
-      if (typeof aladin.gotoRaDec === "function") {
-        aladin.gotoRaDec(cam.ra, cam.dec);
+      // Fast path: View.pointTo → wasm.setCenter (Aladin 3.x)
+      if (aladin.view && typeof aladin.view.pointTo === "function") {
+        aladin.view.pointTo(ra, dec);
+        ok = true;
+      } else if (typeof aladin.gotoRaDec === "function") {
+        aladin.gotoRaDec(ra, dec);
+        ok = true;
       }
-      if (typeof aladin.setFov === "function") {
-        aladin.setFov(cam.fov);
+
+      // FoV: Aladin exposes setFoV (alias setFov)
+      if (Number.isFinite(fov)) {
+        if (typeof aladin.setFoV === "function") {
+          aladin.setFoV(fov);
+        } else if (typeof aladin.setFov === "function") {
+          aladin.setFov(fov);
+        } else if (aladin.view && typeof aladin.view.setFoV === "function") {
+          aladin.view.setFoV(fov);
+        }
       }
-    } catch {
-      /* soft */
+
+      // Nudge paint
+      if (aladin.view && typeof aladin.view.requestRedraw === "function") {
+        aladin.view.requestRedraw();
+      } else if (typeof aladin.requestRedraw === "function") {
+        aladin.requestRedraw();
+      }
+    } catch (e) {
+      console.warn("applyCam", e);
+      return false;
     }
+
+    try {
+      window.__ncCam = { ra, dec, fov, ok, t: now };
+    } catch {
+      /* ignore */
+    }
+    return ok;
   }
 
   function goto(view, { hard = false } = {}) {
     if (!view) return;
+    cam.ra = Number(view.ra);
+    cam.dec = Number(view.dec);
+    if (view.fov != null) cam.fov = Number(view.fov);
     if (hard) {
-      cam.ra = Number(view.ra);
-      cam.dec = Number(view.dec);
-      if (view.fov != null) cam.fov = Number(view.fov);
-      applyCam();
+      applyCam(true);
       setMotionBlur(0);
       fx?.setSkyFromView(cam);
       fx?.setThrottle(0);
       return;
     }
-    glideStep(view, 0.5);
+    applyCam(true);
   }
 
   /**
-   * Live glide toward target — speed scales with throttle (0–1).
-   * Uses internal cam as truth so each frame advances for real.
-   * @returns {{ ra, dec, fov, distDeg, speed }}
+   * Live glide toward target — throttle (0–1) scales degrees/frame.
+   * Always mutates cam and calls applyCam so Aladin updates.
    */
   function glideStep(target, throttle = 0.35) {
-    if (!target) {
-      return { ...cam, distDeg: 0, speed: 0 };
+    if (!target || !aladin) {
+      return { ...cam, distDeg: 0, speed: 0, applied: false };
     }
 
     const t = Math.max(0, Math.min(1, Number(throttle) || 0));
-    // Degrees per frame at 60fps — readable motion at mid/high throttle
-    // t=0 → no move; t=0.25 → ~0.35°; t=1 → ~2.2°/frame (~130°/s)
-    const maxStep = t <= 0.001 ? 0 : 0.12 + t * 2.1;
+    // Visible motion: t=0.35 → ~0.85°/frame; t=1 → ~2.2°/frame
+    const maxStep = t <= 0.02 ? 0 : 0.2 + t * 2.0;
 
     const dRa = wrapDeltaRa(Number(target.ra) - cam.ra);
     const dDec = Number(target.dec) - cam.dec;
-    const cos = Math.cos((cam.dec * Math.PI) / 180);
+    const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
     const dist = Math.hypot(dRa * cos, dDec);
 
-    // Slow gently in the last few degrees
-    const approach = dist < 3 ? Math.max(0.25, dist / 3) : 1;
+    const approach = dist < 4 ? Math.max(0.2, dist / 4) : 1;
     const stepDeg = maxStep * approach;
 
-    let nRa = cam.ra;
-    let nDec = cam.dec;
     if (dist > 1e-4 && stepDeg > 0) {
       const move = Math.min(stepDeg, dist);
       const u = move / dist;
-      nRa = cam.ra + dRa * u;
-      nDec = cam.dec + dDec * u;
+      let nRa = cam.ra + dRa * u;
+      let nDec = cam.dec + dDec * u;
       nRa = ((nRa % 360) + 360) % 360;
-      nDec = Math.max(-90, Math.min(90, nDec));
+      nDec = Math.max(-89.9, Math.min(89.9, nDec));
+      cam.ra = nRa;
+      cam.dec = nDec;
     }
 
-    const tFov = target.fov != null ? Number(target.fov) : cam.fov;
-    const nFov = cam.fov + (tFov - cam.fov) * (0.08 + t * 0.15);
+    if (target.fov != null && Number.isFinite(Number(target.fov))) {
+      const tFov = Number(target.fov);
+      cam.fov = cam.fov + (tFov - cam.fov) * (0.1 + t * 0.2);
+    }
 
-    cam = { ra: nRa, dec: nDec, fov: nFov };
-    applyCam();
+    const applied = applyCam(t > 0.04); // force apply while gliding
 
     const speed = t > 0.04 && dist > 0.02 ? Math.min(1, t) : 0;
-    lastGlideSpeed = speed * 0.55 + lastGlideSpeed * 0.45;
+    lastGlideSpeed = speed * 0.6 + lastGlideSpeed * 0.4;
     setMotionBlur(lastGlideSpeed);
     fx?.setThrottle(t);
     fx?.setSkyFromView(cam);
 
     return {
-      ra: nRa,
-      dec: nDec,
-      fov: nFov,
+      ra: cam.ra,
+      dec: cam.dec,
+      fov: cam.fov,
       distDeg: dist,
       speed: lastGlideSpeed,
+      applied,
     };
+  }
+
+  /**
+   * Instant nudge used when throttle keys/slider change (extra push).
+   */
+  function throttleKick(target, throttle) {
+    if (!target) return null;
+    // One larger step for immediate feedback
+    const t = Math.max(0, Math.min(1, Number(throttle) || 0));
+    if (t <= 0.02) {
+      applyCam(true);
+      fx?.setThrottle(0);
+      setMotionBlur(0);
+      return getView();
+    }
+    // Temporarily boost for one frame feel
+    const boost = Math.min(1, t + 0.15);
+    return glideStep(target, boost);
   }
 
   function setMotionBlur(amount) {
     const stage = document.getElementById("sky-stage");
-    const glass = document.querySelector(".aladin-glass");
     if (!stage) return;
     const a = Math.max(0, Math.min(1, amount));
     stage.style.setProperty("--glide", String(a));
     stage.classList.toggle("is-gliding", a > 0.12);
+    // Intentionally do NOT filter/transform #aladin-lite-div — freezes WASM canvas
+    const glass = document.querySelector(".aladin-glass");
     if (glass) {
-      // subtle CSS blur + scale for motion feel (lightweight)
-      const blur = (a * 0.55).toFixed(2);
-      const scale = (1 + a * 0.012).toFixed(4);
-      glass.style.filter = a > 0.08 ? `blur(${blur}px) brightness(1.05)` : "";
-      glass.style.transform = a > 0.08 ? `scale(${scale})` : "";
+      glass.style.filter = "";
+      glass.style.transform = "";
     }
   }
 
@@ -260,24 +308,20 @@ export function createWindshield(
     if (stage) stage.dataset.phase = phase || "";
   }
 
-  /** Apply chapter sky mood + optional Aladin survey */
   function applyChapterSky(night) {
     const sky = night?.sky || { mood: night?.weather_mood || "rain" };
     fx?.setWeather(sky);
     const stage = document.getElementById("sky-stage");
     if (stage) stage.dataset.weather = sky.mood || night?.weather_mood || "rain";
-    if (aladin && sky.survey && typeof aladin.setBaseImageLayer === "function") {
-      try {
-        aladin.setBaseImageLayer(sky.survey);
-      } catch {
-        /* survey may not exist on all builds */
-      }
-    } else if (aladin && sky.survey && typeof aladin.setImageSurvey === "function") {
-      try {
+    if (!aladin || !sky.survey) return;
+    try {
+      if (typeof aladin.setImageSurvey === "function") {
         aladin.setImageSurvey(sky.survey);
-      } catch {
-        /* ignore */
+      } else if (typeof aladin.setBaseImageLayer === "function") {
+        aladin.setBaseImageLayer(sky.survey);
       }
+    } catch {
+      /* ignore */
     }
   }
 
@@ -336,14 +380,6 @@ export function createWindshield(
           mystSrc.forEach((s) => mysteryCatalog.addSources([s]));
         }
       }
-
-      // pulse stage when pins refresh
-      const stage = document.getElementById("sky-stage");
-      if (stage) {
-        stage.classList.remove("pins-pulse");
-        void stage.offsetWidth;
-        stage.classList.add("pins-pulse");
-      }
     } catch (e) {
       console.warn("setOverlays", e);
     }
@@ -355,6 +391,8 @@ export function createWindshield(
     getView,
     goto,
     glideStep,
+    throttleKick,
+    applyCam,
     setOverlays,
     setPhase,
     setMotionBlur,
@@ -367,6 +405,9 @@ export function createWindshield(
     },
     get ready() {
       return ready;
+    },
+    get cam() {
+      return { ...cam };
     },
   };
 }

@@ -68,7 +68,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.4.5";
+export const CORE_LOOP_VERSION = "1.4.7";
 
 const State = {
   BOOT: "BOOT",
@@ -364,6 +364,41 @@ export function startGame(ui) {
    * @param {number} delta  + up / − down
    * @param {{ repeat?: boolean }} [opts]
    */
+  /** Push current throttle into Aladin immediately (don't wait for rAF) */
+  function applyThrottleToSky(reason = "") {
+    if (!session || !night || !windshield.ready) return;
+    if (state === State.MENU || state === State.BOOT || state === State.CLOSEOUT) {
+      return;
+    }
+    const thr = Number(session.throttle || 0);
+    if (thr > 0.04 && !session.resting && session.spoons > 0.02) {
+      if (state === State.REST) leaveRestIfNeeded();
+      if (state === State.ARRIVE) setState(State.FLIGHT);
+      const wp = currentWaypoint(night, session);
+      if (wp?.view) {
+        // Immediate visual step so key/slider feels connected to the sky
+        if (typeof windshield.throttleKick === "function") {
+          windshield.throttleKick(wp.view, thr);
+        } else {
+          windshield.glideStep(wp.view, thr);
+        }
+      }
+    } else {
+      windshield.fx?.setThrottle(0);
+      windshield.setMotionBlur?.(0);
+    }
+    try {
+      window.__ncThrottle = {
+        thr,
+        state,
+        reason,
+        cam: windshield.cam,
+      };
+    } catch {
+      /* ignore */
+    }
+  }
+
   function nudgeThrottle(delta, opts = {}) {
     // Allow throttle while a flight session is open (FLIGHT/MYSTERY/ARRIVE/REST)
     if (!session) return;
@@ -387,18 +422,17 @@ export function startGame(ui) {
     const cur = Number(session.throttle || 0);
     const next = Math.max(0, Math.min(1, Math.round((cur + signed) * 100) / 100));
     if (slider) slider.value = String(next);
-    // Avoid dispatchEvent('input') — can re-enter and fight Aladin focus
     setThrottle(session, next);
+    if (session.throttle > 0.04) session.resting = false;
     if (state === State.REST && next > 0.04) leaveRestIfNeeded();
-    if (session.resting && next > 0.04 && state !== State.REST) {
-      session.resting = false;
-    }
+    if (state === State.ARRIVE && next > 0.04) setState(State.FLIGHT);
     try {
       audio.setWind(session.resting ? 0 : next);
     } catch {
       /* ignore */
     }
     windshield.fx?.setThrottle(session.resting ? 0 : next);
+    applyThrottleToSky("nudge");
     renderMeters();
     updateFlightBar();
   }
@@ -1190,19 +1224,33 @@ export function startGame(ui) {
       tryClaimMystery();
     } else freePin();
   });
-  el.throttle()?.addEventListener("input", (e) => {
+  function onThrottleInput(e) {
     if (!session) return;
-    setThrottle(session, e.target.value);
-    audio.setWind(session.resting ? 0 : session.throttle);
+    const v = Number(e?.target?.value ?? el.throttle()?.value ?? 0);
+    setThrottle(session, v);
+    if (session.throttle > 0.04) {
+      session.resting = false;
+      if (state === State.REST) leaveRestIfNeeded();
+      if (state === State.ARRIVE) setState(State.FLIGHT);
+    }
+    try {
+      audio.setWind(session.resting ? 0 : session.throttle);
+    } catch {
+      /* ignore */
+    }
     windshield.fx?.setThrottle(session.resting ? 0 : session.throttle);
-    if (state === State.REST && session.throttle > 0.04) {
-      leaveRestIfNeeded();
-    } else if (session.resting || state === State.REST) {
+    applyThrottleToSky("slider");
+    if (session.resting || state === State.REST) {
       setWhisper("Resting — spoons recovering…");
     } else if (session.spoons < 0.2) {
       setWhisper("Easy on the throttle — spoons are thin.");
+    } else {
+      setWhisper(`Throttle ${Math.round(session.throttle * 100)}% — sky gliding.`);
     }
-  });
+    updateFlightBar();
+  }
+  el.throttle()?.addEventListener("input", onThrottleInput);
+  el.throttle()?.addEventListener("change", onThrottleInput);
 
   document.getElementById("btn-panel-toggle")?.addEventListener("click", () => {
     togglePanel();
