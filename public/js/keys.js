@@ -93,9 +93,9 @@ export function focusShell() {
         /* ignore */
       }
     }
-    // Blur any contenteditable / aladin internals
+    // Blur any contenteditable / sky canvas focus traps
     if (ae && ae !== document.body && ae.id !== "nc-key-sink") {
-      if (ae.closest && ae.closest("#aladin-lite-div, #sky-stage, .aladin-container")) {
+      if (ae.closest && ae.closest("#sky-canvas, #sky-stage, #aladin-lite-div")) {
         try {
           ae.blur();
         } catch {
@@ -121,7 +121,7 @@ export function rebindKeys() {
   focusShell();
 }
 
-// Bind at parse time in browser (before Aladin.aladin in startGame)
+// Bind at parse time in browser (before game / sky boot)
 if (typeof window !== "undefined") {
   bindKeys();
 }

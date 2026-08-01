@@ -123,7 +123,6 @@ header .tagline {
   margin: 0.45rem 0.75rem 0.35rem;
   border-radius: 1rem;
   overflow: hidden;
-  /* isolation:isolate freezes Aladin WebGL scenery updates in some browsers */
   isolation: auto;
   border: 1px solid var(--border);
   box-shadow:
@@ -174,44 +173,29 @@ header .tagline {
     0 0 50px rgba(232, 213, 163, 0.12);
 }
 
-#aladin-lite-div,
-.aladin-glass,
-.aladin-container {
+/* Custom canvas night sky (replaces Aladin) */
+#sky-canvas,
+.sky-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   min-height: 0;
-  /* No filter/transform/will-change/isolation — freezes Aladin HiPS WebGL */
-  filter: none !important;
-  transform: none !important;
-  will-change: auto !important;
-  isolation: auto !important;
-  transition: none !important;
-  /* Keep WebGL canvas in normal paint flow */
-  contain: none !important;
+  display: block;
+  z-index: 0;
+  background: #03040a;
+  pointer-events: none;
 }
 
-/* HiPS + catalog canvases must stay unfiltered so scenery scrolls */
-#aladin-lite-div canvas,
-.aladin-imageCanvas,
-.aladin-catalogCanvas {
-  filter: none !important;
-  transform: none !important;
-  will-change: auto !important;
-  image-rendering: auto;
-}
-
-/* particle / veil layers above Aladin, below reticle */
+/* Legacy FX canvas hidden — sky owns stars/scenery */
 .fx-canvas {
+  display: none;
   pointer-events: none;
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 1;
   width: 100%;
   height: 100%;
-  /* Keep FX transparent enough that DSS scenery reads through */
-  opacity: 0.92;
 }
 
 /* Invisible keyboard focus target — never blocks clicks */

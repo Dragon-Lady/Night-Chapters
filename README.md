@@ -22,12 +22,12 @@ npm start
 
 ### How to fly
 
-1. Wait for the **Aladin** sky glass.  
+1. Wait for the **canvas sky glass**.  
 2. **Choose a night** (or press `1`–`4`).  
 3. **Begin night** (`Enter` / `B`) — soft ambient starts.  
-4. Raise **throttle** (`↑`/`↓`) — glass glides toward the heading bug; **spoons** drain.  
+4. Raise **throttle** (`W`/`S` or `↑`/`↓`) — stars and scenery glide toward the heading bug; **spoons** drain.  
 5. **`Space`** — rest; spoons recover; silence.  
-6. On a story pin — read the whisper · **`N`** next · **`S`** skip (allowed).  
+6. On a story pin — read the whisper · **`N`** next · **`X`** skip (allowed).  
 7. Near **✧** drift or **✦** chapter mystery — **`P`** to name it (saved to house pins + score).  
 8. **`C`** closeout → **wonder reflection** · Back to nights or Fly again.  
 
@@ -99,7 +99,7 @@ Full notes: [`docs/DEPLOY.md`](./docs/DEPLOY.md)
 ## Stack
 
 - Vanilla JS (ES modules)  
-- [Aladin Lite](https://aladin.cds.unistra.fr/) CDN windshield  
+- Custom canvas night sky (`windshield.js`) — throttle pans stars & scenery  
 - Web Audio ambients (no sample files)  
 - localStorage progress / pins / reflections  
 

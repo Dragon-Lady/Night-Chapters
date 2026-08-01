@@ -6,7 +6,7 @@
 import { bindKeys } from "./keys.js";
 import { startGame } from "./game-loop.js";
 
-// Bind keyboard shell before game/Aladin finish booting
+// Bind keyboard shell before game / sky boot
 bindKeys();
 
 function main() {

@@ -6,7 +6,7 @@
     <title>Night Chapters — I want to see. I play.</title>
     <meta
       name="description"
-      content="Gentle night flight through a personal sky. Wonder-first. Personal pins, soft ambients, Aladin windshield."
+      content="Gentle night flight through a personal sky. Wonder-first. Personal pins, soft ambients, canvas windshield."
     />
     <meta name="theme-color" content="#05060a" />
     <meta property="og:title" content="Night Chapters" />
@@ -44,12 +44,13 @@
     </header>
 
     <div id="sky-stage">
-      <div
-        id="aladin-lite-div"
+      <canvas
+        id="sky-canvas"
+        class="sky-canvas"
         role="img"
-        aria-label="Sky windshield — Aladin real-sky glass"
-      ></div>
-      <canvas id="fx-canvas" class="fx-canvas" aria-hidden="true"></canvas>
+        aria-label="Night sky windshield — gentle flight glass"
+      ></canvas>
+      <canvas id="fx-canvas" class="fx-canvas" aria-hidden="true" hidden></canvas>
       <div class="sky-veil" aria-hidden="true"></div>
       <div class="reticle" aria-hidden="true"></div>
       <!-- Always-visible flight controls (when panel collapsed, still clickable) -->
@@ -239,10 +240,6 @@
       Not a military sim
     </p>
 
-    <script
-      src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"
-      charset="utf-8"
-    ></script>
     <script type="module" src="./js/main.js"></script>
   </body>
 </html>

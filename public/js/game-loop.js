@@ -68,7 +68,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.5.1";
+export const CORE_LOOP_VERSION = "1.6.0";
 
 const State = {
   BOOT: "BOOT",
@@ -88,7 +88,7 @@ const ACTIVE = new Set([
 ]);
 
 export function startGame(ui) {
-  const windshield = createWindshield("#aladin-lite-div");
+  const windshield = createWindshield("#sky-canvas");
   const audio = createAudio();
   let night = null;
   let session = null;
@@ -365,9 +365,8 @@ export function startGame(ui) {
    * @param {{ repeat?: boolean }} [opts]
    */
   /**
-   * Push current throttle into Aladin immediately (don't wait for rAF).
+   * Push current throttle into the sky immediately (don't wait for rAF).
    * Called from W/S keys, slider input, and flight-bar buttons.
-   * Must call glideStep/throttleKick so pointTo + FX cam delta fire now.
    */
   function applyThrottleToSky(reason = "") {
     if (!session || !night || !windshield.ready) return;
@@ -381,18 +380,10 @@ export function startGame(ui) {
       if (state === State.ARRIVE) setState(State.FLIGHT);
       const wp = currentWaypoint(night, session);
       const target = wp?.view || null;
-      // Immediate pointTo + catalog + FX from same throttle delta
       if (typeof windshield.throttleKick === "function") {
         step = windshield.throttleKick(target, thr, 1 / 24);
       } else {
         step = windshield.glideStep(target, thr, 1 / 24);
-      }
-      // Force absolute camera assert (pointTo) again
-      if (typeof windshield.forcePointTo === "function") {
-        const c = windshield.cam;
-        windshield.forcePointTo(c.ra, c.dec, true);
-      } else {
-        windshield.applyCam?.(true);
       }
     } else {
       windshield.fx?.setThrottle(0);
@@ -729,7 +720,7 @@ export function startGame(ui) {
       }
     }
 
-    // FLIGHT + MYSTERY: live glide — throttle drives Aladin + FX every rAF
+    // FLIGHT + MYSTERY: live glide — throttle drives canvas sky every rAF
     const thr = Number(session.throttle || 0);
     const canGlide =
       (state === State.FLIGHT || state === State.MYSTERY) &&
@@ -747,7 +738,7 @@ export function startGame(ui) {
         return;
       }
 
-      // Every rAF: throttle delta → view.pointTo + catalog + FX (same delta)
+      // Every rAF: throttle delta → cam pan (stars + scenery move together)
       const step = windshield.glideStep(wp.view, thr, dt);
       windshield.fx?.setThrottle(thr);
       try {
@@ -847,7 +838,6 @@ export function startGame(ui) {
     setState(State.BOOT);
     setWhisper("Warming the glass…");
     night = await loadNight(selectedNightId);
-    await waitFor(() => typeof A !== "undefined", 8000);
     windshield.boot();
     windshield.whenReady(() => {
       // Keep original capture listener (first); only refresh handler + focus
@@ -1282,7 +1272,6 @@ export function startGame(ui) {
       /* ignore */
     }
     windshield.fx?.setThrottle(session.resting ? 0 : session.throttle);
-    // Immediate Aladin push on every slider tick
     applyThrottleToSky("slider");
     if (session.resting || state === State.REST) {
       setWhisper("Resting — spoons recovering…");
