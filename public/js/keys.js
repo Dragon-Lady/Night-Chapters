@@ -24,6 +24,7 @@ let bound = false;
 
 export function bindKeys() {
   if (bound) return;
+  if (typeof window === "undefined" || typeof document === "undefined") return;
   bound = true;
   // Capture first on window (top of path)
   window.addEventListener("keydown", dispatch, true);
