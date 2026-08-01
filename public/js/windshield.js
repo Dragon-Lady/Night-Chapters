@@ -741,49 +741,68 @@ export function createWindshield(
   }
 
   /**
-   * Very faint grid — orientation only, not a cage.
-   * Wider spacing when zoomed out; low alpha.
+   * Barely-there sky grid — heavy fade so ribbon + anchors stay primary.
+   * Lines stay at the periphery (radial mask); center of glass is almost clean.
    */
   function drawCoordGrid() {
     const fov = Math.max(2, cam.fov);
-    const step = fov > 18 ? 20 : fov > 12 ? 15 : 10;
+    // Very coarse lattice — avoids checkered cage feel
+    const step = fov > 16 ? 30 : 20;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const fadeR = Math.min(w, h) * 0.22; // soft hole in the middle
+    const fullR = Math.min(w, h) * 0.55;
+
     ctx.save();
-    ctx.strokeStyle = "rgba(140, 170, 220, 0.045)";
+    // Clip+fade: draw to temp opacity, then punch soft center
+    ctx.globalAlpha = 0.022; // nearly invisible overall
+    ctx.strokeStyle = "rgba(150, 175, 220, 1)";
     ctx.lineWidth = 1;
-    const ra0 = Math.floor(cam.ra / step) * step - step * 4;
-    for (let i = 0; i < 10; i++) {
-      const ra = ra0 + i * step;
+
+    const strokeChain = (points) => {
+      if (points.length < 2) return;
       ctx.beginPath();
-      let started = false;
-      for (let j = 0; j <= 10; j++) {
-        const dec = cam.dec - step * 5 + j * step;
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+      ctx.stroke();
+    };
+
+    const ra0 = Math.floor(cam.ra / step) * step - step * 3;
+    for (let i = 0; i < 8; i++) {
+      const ra = ra0 + i * step;
+      const pts = [];
+      for (let j = 0; j <= 8; j++) {
+        const dec = cam.dec - step * 4 + j * step;
         if (dec < -90 || dec > 90) continue;
         const p = project(ra, dec);
         if (!p) continue;
-        if (!started) {
-          ctx.moveTo(p.x, p.y);
-          started = true;
-        } else ctx.lineTo(p.x, p.y);
+        // Skip segments near view center (keep glass clear for ribbon)
+        const d = Math.hypot(p.x - cx, p.y - cy);
+        if (d < fadeR) continue;
+        pts.push(p);
       }
-      if (started) ctx.stroke();
+      strokeChain(pts);
     }
-    const dec0 = Math.floor(cam.dec / step) * step - step * 4;
-    for (let i = 0; i < 10; i++) {
+    const dec0 = Math.floor(cam.dec / step) * step - step * 3;
+    for (let i = 0; i < 8; i++) {
       const dec = dec0 + i * step;
       if (dec < -90 || dec > 90) continue;
-      ctx.beginPath();
-      let started = false;
-      for (let j = 0; j <= 10; j++) {
-        const ra = cam.ra - step * 5 + j * step;
+      const pts = [];
+      for (let j = 0; j <= 8; j++) {
+        const ra = cam.ra - step * 4 + j * step;
         const p = project(ra, dec);
         if (!p) continue;
-        if (!started) {
-          ctx.moveTo(p.x, p.y);
-          started = true;
-        } else ctx.lineTo(p.x, p.y);
+        const d = Math.hypot(p.x - cx, p.y - cy);
+        if (d < fadeR) continue;
+        pts.push(p);
       }
-      if (started) ctx.stroke();
+      strokeChain(pts);
     }
+
+    // Extra soft veil: dim anything remaining near center
+    ctx.globalAlpha = 1;
+    const veil = ctx.createRadialGradient(cx, cy, fadeR * 0.5, cx, cy, fullR);
+    // This doesn't erase strokes already drawn; we already skipped center points.
     ctx.restore();
   }
 
