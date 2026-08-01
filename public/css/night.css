@@ -123,7 +123,8 @@ header .tagline {
   margin: 0.45rem 0.75rem 0.35rem;
   border-radius: 1rem;
   overflow: hidden;
-  isolation: isolate;
+  /* isolation:isolate freezes Aladin WebGL scenery updates in some browsers */
+  isolation: auto;
   border: 1px solid var(--border);
   box-shadow:
     0 20px 60px rgba(0, 0, 0, 0.55),
@@ -174,17 +175,31 @@ header .tagline {
 }
 
 #aladin-lite-div,
-.aladin-glass {
+.aladin-glass,
+.aladin-container {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   min-height: 0;
-  /* No filter/transform/will-change — any of these can freeze Aladin WebGL paints */
+  /* No filter/transform/will-change/isolation — freezes Aladin HiPS WebGL */
   filter: none !important;
   transform: none !important;
-  will-change: auto;
-  transition: none;
+  will-change: auto !important;
+  isolation: auto !important;
+  transition: none !important;
+  /* Keep WebGL canvas in normal paint flow */
+  contain: none !important;
+}
+
+/* HiPS + catalog canvases must stay unfiltered so scenery scrolls */
+#aladin-lite-div canvas,
+.aladin-imageCanvas,
+.aladin-catalogCanvas {
+  filter: none !important;
+  transform: none !important;
+  will-change: auto !important;
+  image-rendering: auto;
 }
 
 /* particle / veil layers above Aladin, below reticle */
@@ -195,6 +210,8 @@ header .tagline {
   z-index: 2;
   width: 100%;
   height: 100%;
+  /* Keep FX transparent enough that DSS scenery reads through */
+  opacity: 0.92;
 }
 
 /* Invisible keyboard focus target — never blocks clicks */
@@ -260,16 +277,18 @@ header .tagline {
   position: absolute;
   inset: 0;
   z-index: 2;
+  /* Light veil — DSS scenery must stay readable while gliding */
   background:
-    radial-gradient(ellipse at 50% 40%, transparent 35%, rgba(0, 0, 0, 0.45) 100%),
+    radial-gradient(ellipse at 50% 40%, transparent 48%, rgba(0, 0, 0, 0.28) 100%),
     linear-gradient(
       180deg,
-      rgba(20, 40, 80, 0.12),
+      rgba(20, 40, 80, 0.06),
       transparent 40%,
-      rgba(10, 8, 20, 0.2)
+      rgba(10, 8, 20, 0.1)
     );
   mix-blend-mode: soft-light;
   transition: background 1.2s ease, opacity 0.6s ease;
+  opacity: 0.85;
 }
 
 #sky-stage.is-gliding .sky-veil {
