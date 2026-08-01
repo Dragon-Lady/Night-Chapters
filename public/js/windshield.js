@@ -14,8 +14,11 @@ const BOOT = {
   heading: 90,
 };
 
-const MAX_DEG_PER_SEC = 14;
-const MIN_DEG_PER_SEC = 2.2;
+/** Low-end crawl so ~5% throttle feels gentle; high end still readable */
+const MAX_DEG_PER_SEC = 11;
+const MIN_DEG_PER_SEC = 0.35;
+/** Curve exponent: higher = slower at low throttle (5% stays crawl) */
+const THROTTLE_CURVE = 1.65;
 /** Max yaw rate while holding A/D (°/s) — gentle turn, not spin */
 const MAX_YAW_DEG_PER_SEC = 42;
 /** Hard cap per frame so bad dt / double-ticks never runaway */
@@ -62,6 +65,8 @@ export function createWindshield(
   let nearStars = [];
   let nebulae = [];
   let clouds = [];
+  /** World-fixed anchors (RA/Dec) — slide across glass as you fly */
+  let landmarks = [];
   let overlays = []; // { ra, dec, name, kind, done }
 
   let running = false;
@@ -200,7 +205,39 @@ export function createWindshield(
       });
     }
 
+    seedLandmarks();
     seedNearStars();
+  }
+
+  /**
+   * Large world-fixed scenery anchors. Fixed in RA/Dec — when the camera
+   * pans they slide on screen so turn/throttle read as real motion.
+   */
+  function seedLandmarks() {
+    // Named “stations” around the story sky + a few mid-path beacons
+    const fixed = [
+      { ra: 83.82, dec: -5.39, kind: "nebula", label: "Orion lamp", hue: 28, size: 1.35 },
+      { ra: 279.23, dec: 38.78, kind: "beacon", label: "Vega porch", hue: 200, size: 1.0 },
+      { ra: 210.8, dec: 54.35, kind: "spiral", label: "Whirlpool", hue: 260, size: 1.15 },
+      { ra: 41.97, dec: 21.39, kind: "glow", label: "Rain glow", hue: 210, size: 0.95 },
+      { ra: 180.0, dec: 20.0, kind: "beacon", label: "Drift spark", hue: 50, size: 0.85 },
+      { ra: 245.0, dec: 46.0, kind: "glow", label: "Quiet spark", hue: 320, size: 0.85 },
+      { ra: 14.18, dec: 60.72, kind: "cluster", label: "Cass W", hue: 190, size: 1.05 },
+      { ra: 37.95, dec: 89.26, kind: "beacon", label: "Pole hold", hue: 200, size: 0.9 },
+      { ra: 56.75, dec: 24.12, kind: "cluster", label: "Seven Sisters", hue: 45, size: 1.1 },
+      { ra: 297.7, dec: 8.87, kind: "beacon", label: "Altair porch", hue: 35, size: 0.95 },
+      { ra: 310.36, dec: 45.28, kind: "nebula", label: "Deneb tail", hue: 300, size: 1.2 },
+      { ra: 120.0, dec: -15.0, kind: "cloud", label: "Soft bank", hue: 215, size: 1.4 },
+      { ra: 330.0, dec: 10.0, kind: "cloud", label: "Night veil", hue: 250, size: 1.3 },
+      { ra: 90.0, dec: 40.0, kind: "spiral", label: "Far wheel", hue: 270, size: 1.0 },
+      { ra: 200.0, dec: -30.0, kind: "nebula", label: "South bloom", hue: 15, size: 1.25 },
+      { ra: 0.0, dec: 0.0, kind: "beacon", label: "Zero meridian", hue: 180, size: 0.8 },
+    ];
+    landmarks = fixed.map((f, i) => ({
+      ...f,
+      tw: hash01(i, 90) * Math.PI * 2,
+      pulse: 0.85 + hash01(i, 91) * 0.3,
+    }));
   }
 
   function seedNearStars() {
@@ -393,11 +430,12 @@ export function createWindshield(
       heading = (heading + yaw + 360) % 360;
     }
 
-    // —— Throttle: translate along current heading ——
+    // —— Throttle: translate along current heading (slow crawl at ~5%) ——
+    const tCurve = Math.pow(Math.max(0, Math.min(1, t)), THROTTLE_CURVE);
     const maxDegPerSec =
       t <= 0.02
         ? 0
-        : MIN_DEG_PER_SEC + t * (MAX_DEG_PER_SEC - MIN_DEG_PER_SEC);
+        : MIN_DEG_PER_SEC + tCurve * (MAX_DEG_PER_SEC - MIN_DEG_PER_SEC);
     const stepDeg = maxDegPerSec * dt;
 
     const prevRa = cam.ra;
@@ -482,6 +520,7 @@ export function createWindshield(
     drawDustLayer();
     drawMilkyBand();
     drawNebulae();
+    drawLandmarks(t);
     drawFieldStars(t);
     drawClouds(t);
     drawNearStars(dt, t);
@@ -664,6 +703,109 @@ export function createWindshield(
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /**
+   * World-fixed anchors (RA/Dec). They do not stick to the camera — when you
+   * pan/turn they slide across the glass so motion is obvious.
+   */
+  function drawLandmarks(t) {
+    for (const L of landmarks) {
+      const p = project(L.ra, L.dec);
+      if (!p) continue;
+      const pulse =
+        0.75 + 0.25 * Math.sin(t * 1.1 * L.pulse + L.tw);
+      const base = Math.max(28, 42 * L.size * (p.scale / 55));
+      const hue = L.hue;
+
+      if (L.kind === "nebula") {
+        const r = base * 1.6;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, `hsla(${hue}, 70%, 62%, ${0.22 * pulse})`);
+        g.addColorStop(0.45, `hsla(${hue + 20}, 55%, 45%, ${0.12 * pulse})`);
+        g.addColorStop(1, `hsla(${hue}, 50%, 30%, 0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, r * 1.15, r * 0.7, L.tw * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (L.kind === "spiral") {
+        const r = base * 1.1;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(t * 0.08 + L.tw);
+        for (let arm = 0; arm < 2; arm++) {
+          ctx.strokeStyle = `hsla(${hue}, 60%, 70%, ${0.35 * pulse})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          for (let a = 0; a < Math.PI * 1.6; a += 0.12) {
+            const rr = (a / (Math.PI * 1.6)) * r;
+            const x = Math.cos(a + arm * Math.PI) * rr;
+            const y = Math.sin(a + arm * Math.PI) * rr * 0.55;
+            if (a === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+        ctx.fillStyle = `hsla(${hue}, 70%, 75%, ${0.5 * pulse})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else if (L.kind === "cluster") {
+        const r = base * 0.85;
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2 + L.tw;
+          const rr = r * (0.25 + (i % 3) * 0.18);
+          const x = p.x + Math.cos(a) * rr;
+          const y = p.y + Math.sin(a) * rr * 0.65;
+          ctx.fillStyle = `hsla(${hue}, 55%, 85%, ${0.55 * pulse})`;
+          ctx.beginPath();
+          ctx.arc(x, y, 1.4 + (i % 2), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = `hsla(${hue}, 60%, 90%, ${0.7 * pulse})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (L.kind === "cloud") {
+        const r = base * 1.8;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, `hsla(${hue}, 35%, 70%, ${0.1 * pulse})`);
+        g.addColorStop(1, `hsla(${hue}, 30%, 40%, 0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, r * 1.4, r * 0.5, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // beacon / glow — bright cross + halo
+        const r = base * 0.9;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, `hsla(${hue}, 80%, 80%, ${0.55 * pulse})`);
+        g.addColorStop(0.35, `hsla(${hue}, 70%, 60%, ${0.2 * pulse})`);
+        g.addColorStop(1, `hsla(${hue}, 60%, 40%, 0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `hsla(${hue}, 80%, 85%, ${0.65 * pulse})`;
+        ctx.lineWidth = 1.5;
+        const arm = 6 + L.size * 4;
+        ctx.beginPath();
+        ctx.moveTo(p.x - arm, p.y);
+        ctx.lineTo(p.x + arm, p.y);
+        ctx.moveTo(p.x, p.y - arm);
+        ctx.lineTo(p.x, p.y + arm);
+        ctx.stroke();
+      }
+
+      // Label (always readable when on glass)
+      if (L.label && p.x > 8 && p.x < w - 8 && p.y > 12 && p.y < h - 8) {
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillStyle = `rgba(230, 236, 255, ${0.55 + 0.25 * pulse})`;
+        ctx.fillText(L.label, p.x + 10, p.y - 8);
+      }
+    }
   }
 
   function drawNebulae() {

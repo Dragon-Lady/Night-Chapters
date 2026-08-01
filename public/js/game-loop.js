@@ -69,7 +69,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.6.4";
+export const CORE_LOOP_VERSION = "1.6.5";
 
 const State = {
   BOOT: "BOOT",
