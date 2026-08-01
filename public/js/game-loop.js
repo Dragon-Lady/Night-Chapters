@@ -68,7 +68,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.5.0";
+export const CORE_LOOP_VERSION = "1.5.1";
 
 const State = {
   BOOT: "BOOT",
@@ -381,14 +381,19 @@ export function startGame(ui) {
       if (state === State.ARRIVE) setState(State.FLIGHT);
       const wp = currentWaypoint(night, session);
       const target = wp?.view || null;
-      // Immediate visual step: cam + gotoRaDec/pointTo + FX streaks
+      // Immediate pointTo + catalog + FX from same throttle delta
       if (typeof windshield.throttleKick === "function") {
         step = windshield.throttleKick(target, thr, 1 / 24);
       } else {
         step = windshield.glideStep(target, thr, 1 / 24);
       }
-      // Force another Aladin paint with current cam
-      windshield.applyCam?.(true);
+      // Force absolute camera assert (pointTo) again
+      if (typeof windshield.forcePointTo === "function") {
+        const c = windshield.cam;
+        windshield.forcePointTo(c.ra, c.dec, true);
+      } else {
+        windshield.applyCam?.(true);
+      }
     } else {
       windshield.fx?.setThrottle(0);
       windshield.fx?.setCamDelta?.(0, 0, 1 / 60, 0);
@@ -742,7 +747,7 @@ export function startGame(ui) {
         return;
       }
 
-      // Every frame: cam delta → gotoRaDec/pointTo + FX setCamDelta
+      // Every rAF: throttle delta → view.pointTo + catalog + FX (same delta)
       const step = windshield.glideStep(wp.view, thr, dt);
       windshield.fx?.setThrottle(thr);
       try {
@@ -751,20 +756,6 @@ export function startGame(ui) {
         /* ignore */
       }
       if (typeof ui?.onGlide === "function") ui.onGlide(step, wp);
-
-      // Debug sample for console (lightweight)
-      try {
-        window.__ncGlide = {
-          movedDeg: step?.movedDeg,
-          applied: step?.applied,
-          dist: step?.distDeg,
-          thr,
-          path: window.__ncCam?.path,
-          t: performance.now(),
-        };
-      } catch {
-        /* ignore */
-      }
 
       // —— Drift mysteries appear during glide ——
       const view = { ra: step.ra, dec: step.dec };
