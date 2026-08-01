@@ -180,8 +180,11 @@ header .tagline {
   width: 100%;
   height: 100%;
   min-height: 0;
-  transition: filter 0.12s linear, transform 0.12s linear;
-  will-change: filter, transform;
+  /* No filter/transform/will-change — any of these can freeze Aladin WebGL paints */
+  filter: none !important;
+  transform: none !important;
+  will-change: auto;
+  transition: none;
 }
 
 /* particle / veil layers above Aladin, below reticle */

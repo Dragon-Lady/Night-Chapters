@@ -23,6 +23,9 @@ export function createFxLayer(canvas) {
   let starDensity = 1;
   let cloudDensity = 1;
   let weatherMood = "rain";
+  /** Accumulated parallax from Aladin cam motion (px) */
+  let panX = 0;
+  let panY = 0;
 
   function resize() {
     const parent = canvas.parentElement;
@@ -72,6 +75,33 @@ export function createFxLayer(canvas) {
     phase = p || "MENU";
     if (phase === "MYSTERY") skyWarmth = Math.min(1, skyWarmth + 0.15);
     else skyWarmth = Math.max(0, skyWarmth - 0.02);
+  }
+
+  /**
+   * Pan starfield by screen pixels (from Aladin cam delta).
+   * Makes throttle motion obvious even when HiPS tiles are dark/slow.
+   */
+  function panBy(dx, dy) {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    panX += dx;
+    panY += dy;
+    // Apply immediately to star positions so motion is frame-synced
+    if (!stars.length) return;
+    for (const s of stars) {
+      s.x += dx * (0.35 + s.z * 0.65);
+      s.y += dy * (0.35 + s.z * 0.65);
+      // wrap
+      if (s.x < -4) s.x = w + 4;
+      if (s.x > w + 4) s.x = -4;
+      if (s.y < -4) s.y = h + 4;
+      if (s.y > h + 4) s.y = -4;
+    }
+    for (const c of clouds) {
+      c.x += dx * 0.25;
+      c.y += dy * 0.15;
+      if (c.x < -c.s * 2) c.x = w + c.s;
+      if (c.x > w + c.s * 2) c.x = -c.s;
+    }
   }
 
   /** Shift ambient hue from view (ra/dec) — subtle, not disco */
@@ -250,5 +280,6 @@ export function createFxLayer(canvas) {
     setPhase,
     setSkyFromView,
     setWeather,
+    panBy,
   };
 }

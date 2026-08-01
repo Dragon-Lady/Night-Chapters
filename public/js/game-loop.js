@@ -68,7 +68,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.4.7";
+export const CORE_LOOP_VERSION = "1.4.8";
 
 const State = {
   BOOT: "BOOT",
@@ -364,13 +364,17 @@ export function startGame(ui) {
    * @param {number} delta  + up / − down
    * @param {{ repeat?: boolean }} [opts]
    */
-  /** Push current throttle into Aladin immediately (don't wait for rAF) */
+  /**
+   * Push current throttle into Aladin immediately (don't wait for rAF).
+   * Called from W/S keys, slider input, and flight-bar buttons.
+   */
   function applyThrottleToSky(reason = "") {
     if (!session || !night || !windshield.ready) return;
     if (state === State.MENU || state === State.BOOT || state === State.CLOSEOUT) {
       return;
     }
     const thr = Number(session.throttle || 0);
+    let step = null;
     if (thr > 0.04 && !session.resting && session.spoons > 0.02) {
       if (state === State.REST) leaveRestIfNeeded();
       if (state === State.ARRIVE) setState(State.FLIGHT);
@@ -378,10 +382,12 @@ export function startGame(ui) {
       if (wp?.view) {
         // Immediate visual step so key/slider feels connected to the sky
         if (typeof windshield.throttleKick === "function") {
-          windshield.throttleKick(wp.view, thr);
+          step = windshield.throttleKick(wp.view, thr, 1 / 30);
         } else {
-          windshield.glideStep(wp.view, thr);
+          step = windshield.glideStep(wp.view, thr, 1 / 30);
         }
+        // Belt-and-suspenders: force one more cam apply after kick
+        windshield.applyCam?.(true);
       }
     } else {
       windshield.fx?.setThrottle(0);
@@ -393,6 +399,8 @@ export function startGame(ui) {
         state,
         reason,
         cam: windshield.cam,
+        step,
+        t: performance.now(),
       };
     } catch {
       /* ignore */
@@ -729,7 +737,8 @@ export function startGame(ui) {
         return;
       }
 
-      const step = windshield.glideStep(wp.view, thr);
+      // dt-aware glide → wasm.setCenter every frame (see windshield.glideStep)
+      const step = windshield.glideStep(wp.view, thr, dt);
       windshield.fx?.setThrottle(thr);
       try {
         audio.setWind(thr);
@@ -1226,6 +1235,14 @@ export function startGame(ui) {
   });
   function onThrottleInput(e) {
     if (!session) return;
+    // Allow while a flight session is open (not only FLIGHT state)
+    if (
+      state === State.MENU ||
+      state === State.BOOT ||
+      state === State.CLOSEOUT
+    ) {
+      return;
+    }
     const v = Number(e?.target?.value ?? el.throttle()?.value ?? 0);
     setThrottle(session, v);
     if (session.throttle > 0.04) {
@@ -1239,6 +1256,7 @@ export function startGame(ui) {
       /* ignore */
     }
     windshield.fx?.setThrottle(session.resting ? 0 : session.throttle);
+    // Immediate Aladin push on every slider tick
     applyThrottleToSky("slider");
     if (session.resting || state === State.REST) {
       setWhisper("Resting — spoons recovering…");
@@ -1248,6 +1266,7 @@ export function startGame(ui) {
       setWhisper(`Throttle ${Math.round(session.throttle * 100)}% — sky gliding.`);
     }
     updateFlightBar();
+    renderMeters();
   }
   el.throttle()?.addEventListener("input", onThrottleInput);
   el.throttle()?.addEventListener("change", onThrottleInput);
