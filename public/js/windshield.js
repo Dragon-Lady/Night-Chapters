@@ -16,8 +16,10 @@ const BOOT = {
 
 const MAX_DEG_PER_SEC = 14;
 const MIN_DEG_PER_SEC = 2.2;
-/** Max yaw rate while holding A/D (°/s) */
-const MAX_YAW_DEG_PER_SEC = 80;
+/** Max yaw rate while holding A/D (°/s) — gentle turn, not spin */
+const MAX_YAW_DEG_PER_SEC = 42;
+/** Hard cap per frame so bad dt / double-ticks never runaway */
+const MAX_YAW_DEG_PER_FRAME = 1.8;
 const FIELD_STAR_N = 720;
 const NEAR_STAR_N = 140;
 const NEBULA_N = 12;
@@ -318,8 +320,8 @@ export function createWindshield(
   }
 
   /**
-   * Own capture listeners so A/D · ←/→ always reach the glass,
-   * even if game-loop key path is blocked.
+   * Own capture listeners so A/D · ←/→ reach the glass.
+   * Bind once on window only (not window+document — that double-fired).
    */
   function bindFlightKeys() {
     if (flightKeysBound || typeof window === "undefined") return;
@@ -349,14 +351,7 @@ export function createWindshield(
       }
       if (hit) {
         recomputeSteer();
-        // Immediate yaw kick so turn is felt on first frame (not only after hold)
-        if (!e.repeat) {
-          const kick = keySteer.right && !keySteer.left ? 1 : keySteer.left && !keySteer.right ? -1 : 0;
-          if (kick) {
-            heading = (heading + kick * 6 + 360) % 360;
-            publishCam();
-          }
-        }
+        // No discrete yaw kick — all turning is dt-limited in advanceCam
         e.preventDefault();
       }
     };
@@ -374,25 +369,31 @@ export function createWindshield(
       if (hit) recomputeSteer();
     };
 
+    // Single target only — document+window both capture = 2× events
     window.addEventListener("keydown", onDown, true);
     window.addEventListener("keyup", onUp, true);
-    document.addEventListener("keydown", onDown, true);
-    document.addEventListener("keyup", onUp, true);
   }
 
   /**
-   * Advance RA/Dec from throttle + heading (shared by glideStep and paint rAF).
-   * @returns {{ dRa:number, dDec:number, movedDeg:number, dxPx:number, dyPx:number, heading:number, steer:number }}
+   * Single integration step: yaw (capped) then move along heading.
+   * Called at most once per rAF via paintLoop (not also from glideStep).
    */
-  function advanceCam(dt) {
+  function advanceCam(dtRaw) {
     recomputeSteer();
+    // Clamp dt so tab-hitch / double-call never spins the sky
+    const dt = Math.min(0.05, Math.max(0.001, Number(dtRaw) || 0.016));
     const t = throttle;
     const steer = Math.max(-1, Math.min(1, steerInput || 0));
-    // Yaw every frame while steer held
+
+    // —— Yaw: rate × dt, hard per-frame cap ——
     if (Math.abs(steer) > 0.02) {
-      heading = (heading + steer * MAX_YAW_DEG_PER_SEC * dt + 360) % 360;
+      let yaw = steer * MAX_YAW_DEG_PER_SEC * dt;
+      if (yaw > MAX_YAW_DEG_PER_FRAME) yaw = MAX_YAW_DEG_PER_FRAME;
+      if (yaw < -MAX_YAW_DEG_PER_FRAME) yaw = -MAX_YAW_DEG_PER_FRAME;
+      heading = (heading + yaw + 360) % 360;
     }
 
+    // —— Throttle: translate along current heading ——
     const maxDegPerSec =
       t <= 0.02
         ? 0
@@ -404,7 +405,6 @@ export function createWindshield(
     let dRa = 0;
     let dDec = 0;
 
-    // Move along current heading (after yaw this frame)
     if (t > 0.02 && stepDeg > 0) {
       const rad = (heading * Math.PI) / 180;
       const cosDec = Math.cos((cam.dec * Math.PI) / 180) || 1;
@@ -418,9 +418,13 @@ export function createWindshield(
       let nRa = cam.ra + dRa;
       let nDec = cam.dec + dDec;
       nRa = ((nRa % 360) + 360) % 360;
-      nDec = Math.max(-89.5, Math.min(89.5, nDec));
-      if (nDec !== cam.dec + dDec) {
-        heading = (360 - heading + 360) % 360;
+      // Soft pole clamp — reverse only the Dec component of heading, not full flip
+      if (nDec > 89.5) {
+        nDec = 89.5;
+        dDec = 0;
+      } else if (nDec < -89.5) {
+        nDec = -89.5;
+        dDec = 0;
       }
       cam.ra = nRa;
       cam.dec = nDec;
@@ -435,8 +439,8 @@ export function createWindshield(
     dustOx = (dustOx + dxPx) % 256;
     dustOy = (dustOy + dyPx) % 256;
     if (dt > 0) {
-      panVelX = panVelX * 0.2 + (dxPx / dt) * 0.8;
-      panVelY = panVelY * 0.2 + (dyPx / dt) * 0.8;
+      panVelX = panVelX * 0.25 + (dxPx / dt) * 0.75;
+      panVelY = panVelY * 0.25 + (dyPx / dt) * 0.75;
     }
     const movedDeg = Math.hypot(dRaMove * cosFx, dDecMove);
     lastAdvanceAt = performance.now();
@@ -461,22 +465,10 @@ export function createWindshield(
       return;
     }
     recomputeSteer();
-    // Catch-up only if game-loop missed frames (glideStep is primary).
-    // Threshold >1 frame so we never double-integrate with glideStep.
-    const now = performance.now();
-    const wantsAdvance =
+    // Sole integrator: one advanceCam per paint frame (never with glideStep)
+    if (
       isFlightPhase() &&
-      (throttle > 0.02 || Math.abs(steerInput) > 0.02);
-    if (wantsAdvance && now - lastAdvanceAt > 40) {
-      advanceCam(dt);
-      publishCam();
-    }
-    // Steer-only yaw when throttle idle: still turn the nose every paint
-    else if (
-      isFlightPhase() &&
-      Math.abs(steerInput) > 0.02 &&
-      throttle <= 0.02 &&
-      now - lastAdvanceAt > 14
+      (throttle > 0.02 || Math.abs(steerInput) > 0.02)
     ) {
       advanceCam(dt);
       publishCam();
@@ -941,13 +933,14 @@ export function createWindshield(
   }
 
   /**
-   * Each rAF from game-loop: set throttle, advance cam, return dist to target.
-   * Paint loop also catch-up advances if this isn't called in time.
+   * Game-loop hook: set throttle / report cam. Does NOT advance cam
+   * (paintLoop is the sole integrator — prevents double yaw spin).
    */
   function glideStep(target, thr = 0.35, dtSec = 1 / 60) {
     const t = Math.max(0, Math.min(1, Number(thr) || 0));
-    const dt = Math.min(0.1, Math.max(0.001, Number(dtSec) || 1 / 60));
+    const dt = Math.min(0.05, Math.max(0.001, Number(dtSec) || 1 / 60));
     throttle = t;
+    recomputeSteer();
 
     const hasTarget =
       target &&
@@ -966,9 +959,6 @@ export function createWindshield(
       }
     }
 
-    // Advance camera every glideStep (primary path)
-    const moved = advanceCam(dt);
-
     // Soft FoV toward pin when near
     if (hasTarget && target.fov != null && Number.isFinite(Number(target.fov))) {
       const tFov = Math.max(5.5, Number(target.fov));
@@ -979,27 +969,30 @@ export function createWindshield(
       cam.fov = Math.min(10, cam.fov + 1.5 * dt);
     }
 
+    const steer = Math.max(-1, Math.min(1, steerInput || 0));
     const speed =
-      t > 0.04 && moved.movedDeg > 0.0002
+      t > 0.04
         ? Math.min(1, t)
-        : t > 0.04
-          ? t * 0.35
+        : Math.abs(steer) > 0.02
+          ? 0.15
           : 0;
     lastGlideSpeed = speed * 0.55 + lastGlideSpeed * 0.45;
     setMotionBlur(lastGlideSpeed);
     publishCam();
 
-    const steer = Math.max(-1, Math.min(1, steerInput || 0));
     let headingErr = null;
     if (bearingTo != null) {
       headingErr = wrapDeltaRa(bearingTo - heading);
     }
 
+    const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
+    const scale = Math.max(1, w) / Math.max(2, cam.fov);
+
     try {
       window.__ncGlide = {
-        dRa: moved.dRa,
-        dDec: moved.dDec,
-        movedDeg: moved.movedDeg,
+        dRa: 0,
+        dDec: 0,
+        movedDeg: lastGlideSpeed,
         applied: true,
         dist,
         thr: t,
@@ -1008,8 +1001,8 @@ export function createWindshield(
         bearingTo,
         headingErr,
         path: "canvas",
-        dxPx: moved.dxPx,
-        dyPx: moved.dyPx,
+        dxPx: panVelX * dt,
+        dyPx: panVelY * dt,
         t: performance.now(),
       };
     } catch {
@@ -1023,11 +1016,11 @@ export function createWindshield(
       distDeg: dist,
       speed: lastGlideSpeed,
       applied: true,
-      movedDeg: moved.movedDeg,
-      dRa: moved.dRa,
-      dDec: moved.dDec,
-      dxPx: moved.dxPx,
-      dyPx: moved.dyPx,
+      movedDeg: Math.hypot(panVelX, panVelY) * dt * (1 / Math.max(scale, 1)),
+      dRa: 0,
+      dDec: 0,
+      dxPx: panVelX * dt,
+      dyPx: panVelY * dt,
       heading,
       steer,
       bearingTo,
@@ -1045,7 +1038,10 @@ export function createWindshield(
       publishCam();
       return getView();
     }
-    return glideStep(target, Math.min(1, t + 0.15), Math.max(dtSec, 1 / 28));
+    throttle = Math.min(1, t + 0.1);
+    recomputeSteer();
+    publishCam();
+    return glideStep(target, throttle, dtSec);
   }
 
   function applyCam() {
