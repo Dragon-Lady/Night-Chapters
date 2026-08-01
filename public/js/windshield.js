@@ -119,8 +119,15 @@ export function createWindshield(
     return aladin;
   }
 
-  function getView() {
+  /**
+   * Read sky position. During active glide prefer internal cam — Aladin's
+   * getRaDec can lag or snap and cancel visual motion if trusted every frame.
+   */
+  function getView({ syncFromAladin = false } = {}) {
     if (!aladin) return { ...cam };
+    if (!syncFromAladin) {
+      return { ra: cam.ra, dec: cam.dec, fov: cam.fov };
+    }
     let ra = cam.ra;
     let dec = cam.dec;
     let fov = cam.fov;
@@ -140,7 +147,7 @@ export function createWindshield(
         fov = Array.isArray(f) ? f[0] : f || fov;
       }
     } catch {
-      /* keep last */
+      /* keep cam */
     }
     cam = { ra: Number(ra), dec: Number(dec), fov: Number(fov) };
     return { ...cam };
@@ -163,65 +170,72 @@ export function createWindshield(
   function goto(view, { hard = false } = {}) {
     if (!view) return;
     if (hard) {
-      cam.ra = view.ra;
-      cam.dec = view.dec;
-      if (view.fov != null) cam.fov = view.fov;
+      cam.ra = Number(view.ra);
+      cam.dec = Number(view.dec);
+      if (view.fov != null) cam.fov = Number(view.fov);
       applyCam();
       setMotionBlur(0);
       fx?.setSkyFromView(cam);
+      fx?.setThrottle(0);
       return;
     }
-    // soft goto: single eased step used by callers over frames
     glideStep(view, 0.5);
   }
 
   /**
-   * Smooth eased glide toward target (ease-out cubic blend).
+   * Live glide toward target — speed scales with throttle (0–1).
+   * Uses internal cam as truth so each frame advances for real.
    * @returns {{ ra, dec, fov, distDeg, speed }}
    */
   function glideStep(target, throttle = 0.35) {
-    const cur = getView();
-    if (!aladin || !target) {
-      return { ...cur, distDeg: 0, speed: 0 };
+    if (!target) {
+      return { ...cam, distDeg: 0, speed: 0 };
     }
 
-    const t = Math.max(0, Math.min(1, throttle));
-    // Ease: higher responsiveness mid-throttle, softer near target
-    const dRa = wrapDeltaRa(target.ra - cur.ra);
-    const dDec = target.dec - cur.dec;
-    const cos = Math.cos((cur.dec * Math.PI) / 180);
+    const t = Math.max(0, Math.min(1, Number(throttle) || 0));
+    // Degrees per frame at 60fps — readable motion at mid/high throttle
+    // t=0 → no move; t=0.25 → ~0.35°; t=1 → ~2.2°/frame (~130°/s)
+    const maxStep = t <= 0.001 ? 0 : 0.12 + t * 2.1;
+
+    const dRa = wrapDeltaRa(Number(target.ra) - cam.ra);
+    const dDec = Number(target.dec) - cam.dec;
+    const cos = Math.cos((cam.dec * Math.PI) / 180);
     const dist = Math.hypot(dRa * cos, dDec);
 
-    // ease-out factor: approach slows near pin (prettier dock)
-    const approach = dist < 2 ? 0.35 + dist * 0.2 : 1;
-    const maxStep = (0.06 + t * 0.48) * approach;
+    // Slow gently in the last few degrees
+    const approach = dist < 3 ? Math.max(0.25, dist / 3) : 1;
+    const stepDeg = maxStep * approach;
 
-    let nRa = cur.ra;
-    let nDec = cur.dec;
-    if (dist > 1e-5) {
-      const step = Math.min(maxStep, dist * (0.12 + t * 0.22));
-      const u = Math.min(1, step / dist);
-      // smoothstep blend
-      const s = u * u * (3 - 2 * u);
-      nRa = cur.ra + dRa * s;
-      nDec = cur.dec + dDec * s;
+    let nRa = cam.ra;
+    let nDec = cam.dec;
+    if (dist > 1e-4 && stepDeg > 0) {
+      const move = Math.min(stepDeg, dist);
+      const u = move / dist;
+      nRa = cam.ra + dRa * u;
+      nDec = cam.dec + dDec * u;
       nRa = ((nRa % 360) + 360) % 360;
       nDec = Math.max(-90, Math.min(90, nDec));
     }
 
-    const tFov = target.fov ?? cur.fov;
-    const nFov = cur.fov + (tFov - cur.fov) * (0.05 + t * 0.1);
+    const tFov = target.fov != null ? Number(target.fov) : cam.fov;
+    const nFov = cam.fov + (tFov - cam.fov) * (0.08 + t * 0.15);
 
     cam = { ra: nRa, dec: nDec, fov: nFov };
     applyCam();
 
-    const speed = dist > 0.01 ? Math.min(1, maxStep / 0.5) * t : 0;
-    lastGlideSpeed = speed * 0.7 + lastGlideSpeed * 0.3;
+    const speed = t > 0.04 && dist > 0.02 ? Math.min(1, t) : 0;
+    lastGlideSpeed = speed * 0.55 + lastGlideSpeed * 0.45;
     setMotionBlur(lastGlideSpeed);
     fx?.setThrottle(t);
     fx?.setSkyFromView(cam);
 
-    return { ra: nRa, dec: nDec, fov: nFov, distDeg: dist, speed: lastGlideSpeed };
+    return {
+      ra: nRa,
+      dec: nDec,
+      fov: nFov,
+      distDeg: dist,
+      speed: lastGlideSpeed,
+    };
   }
 
   function setMotionBlur(amount) {

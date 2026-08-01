@@ -596,15 +596,18 @@ export function startGame(ui) {
     if (state !== State.REST || !session) return;
     if (session.spoons <= 0.02) return;
     if (session.throttle > 0.04) {
+      session.resting = false;
       const next =
         resumeState === State.REST || resumeState === State.CLOSEOUT
           ? State.FLIGHT
-          : resumeState;
+          : resumeState === State.ARRIVE
+            ? State.FLIGHT
+            : resumeState;
       setState(next);
       setWhisper(
         next === State.MYSTERY
           ? "Back to the glow…"
-          : "Glide resumes. Soft sky ahead."
+          : "Glide resumes — sky follows throttle."
       );
     }
   }
@@ -650,38 +653,55 @@ export function startGame(ui) {
       el.throttle().value = String(session.throttle);
     }
 
-    // REST: no glide, spoons recover (already in tickSpoons)
+    // REST: spoons recover; throttle-up leaves rest
     if (state === State.REST) {
       windshield.fx?.setThrottle(0);
       leaveRestIfNeeded();
-      renderMeters();
-      return;
+      // If user raised throttle, leaveRestIfNeeded may have set FLIGHT — fall through
+      if (state === State.REST) {
+        renderMeters();
+        updateFlightBar();
+        return;
+      }
     }
 
-    // ARRIVE: parked on pin beat — no auto glide until Next
+    // ARRIVE: short park — but throttle-up continues toward next pin
     if (state === State.ARRIVE) {
-      windshield.fx?.setThrottle(0);
-      windshield.setMotionBlur?.(0);
-      renderMeters();
-      return;
+      if (session.throttle > 0.08 && session.spoons > 0.02 && !session.resting) {
+        // Auto-depart: user is flying, don't strand them on a whisper
+        setState(State.FLIGHT);
+        setWhisper("Glide on — heading continues.");
+      } else {
+        windshield.fx?.setThrottle(0);
+        windshield.setMotionBlur?.(0);
+        renderMeters();
+        updateFlightBar();
+        return;
+      }
     }
 
-    // FLIGHT + MYSTERY: throttle glide when not resting
-    if (
+    // FLIGHT + MYSTERY: live glide — throttle drives sky motion
+    const thr = Number(session.throttle || 0);
+    const canGlide =
       (state === State.FLIGHT || state === State.MYSTERY) &&
       !session.resting &&
-      session.throttle > 0.04 &&
-      session.spoons > 0.02
-    ) {
+      thr > 0.04 &&
+      session.spoons > 0.02;
+
+    if (canGlide) {
       const wp = currentWaypoint(night, session);
       if (!wp) {
         beginCloseout();
         return;
       }
 
-      const step = windshield.glideStep(wp.view, session.throttle);
-      windshield.fx?.setThrottle(session.throttle);
-      audio.setWind(session.throttle);
+      const step = windshield.glideStep(wp.view, thr);
+      windshield.fx?.setThrottle(thr);
+      try {
+        audio.setWind(thr);
+      } catch {
+        /* ignore */
+      }
       if (typeof ui?.onGlide === "function") ui.onGlide(step, wp);
 
       // —— Drift mysteries appear during glide ——
@@ -833,16 +853,32 @@ export function startGame(ui) {
       );
       lowSpoonsWhispered = false;
       resumeState = State.FLIGHT;
-      const t0 = Number(el.throttle()?.value || 0.25);
+      // Start with readable throttle so sky moves immediately
+      const t0 = Math.max(0.35, Number(el.throttle()?.value || 0.35));
+      if (el.throttle()) el.throttle().value = String(t0);
       setThrottle(session, t0);
-      const first = night.pins[0]?.view;
-      if (first) windshield.goto(first, { hard: true });
+      // Depart from first pin already "visited" so we don't park in ARRIVE
+      // and block glide until Next — throttle can fly toward pin 2 immediately.
+      if (night.pins?.length) {
+        const first = night.pins[0];
+        if (first?.view) windshield.goto(first.view, { hard: true });
+        session.pinIndex = 0;
+        // Mark start pin lightly without ARRIVE lock
+        if (!session.fixesVisited.includes(first.id)) {
+          session.fixesVisited.push(first.id);
+          session.discovered.storyPins.push(first.id);
+          const pts = session.scoreTable?.STORY_PIN ?? 10;
+          session.score += pts;
+          session.navLog.push(`Departed: ${first.label} (+${pts})`);
+          session.pinIndex = 1;
+        }
+      }
       // Arm keys BEFORE setState (which auto-collapses panel)
       armKeyboard("pre-flight");
       setState(State.FLIGHT);
       setWhisper(
         night.whisper_start ||
-          "Glide: W/S throttle · Space rest · Esc menu · use flight bar if keys lag."
+          "Throttle moves the sky — W/S or slider. Space rest · Esc menu."
       );
       armKeyboard("post-flight");
       // Aladin may steal focus on first paint — reclaim repeatedly
