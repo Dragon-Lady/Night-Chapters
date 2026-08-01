@@ -563,8 +563,8 @@ export function createWindshield(
     ctx.rotate(worldRotationRad());
     ctx.translate(-cx, -cy);
     drawDustLayer();
-    drawCoordGrid(); // faint, behind ribbon/anchors
-    drawMilkyBand();
+    drawCoordGrid(); // very faint, behind ribbon/anchors
+    drawMilkyBand(t);
     drawNebulae();
     drawLandmarks(t);
     drawFieldStars(t);
@@ -572,11 +572,156 @@ export function createWindshield(
     drawOverlays();
     ctx.restore();
 
-    // Screen-space layers (not rotated)
+    // Screen-space layers (not rotated with world)
     drawNearStars(dt, t);
     drawCardinalRim();
+    drawCompassRose(t);
+    drawRibbonBearingCue();
     drawHeadingHud();
-    drawVignette();
+    drawVignette(t);
+  }
+
+  /**
+   * Faint compass rose that turns with sky heading (screen-fixed center,
+   * ticks rotate so N/E/S/W move as you yaw).
+   */
+  function drawCompassRose(t) {
+    if (!isFlightPhase()) return;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const R = Math.min(w, h) * 0.16;
+    // World rot maps sky north → screen; rose ticks use same rot
+    const rot = worldRotationRad();
+    const pulse = 0.85 + 0.15 * Math.sin(t * 1.4);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    // Outer ring
+    ctx.strokeStyle = `rgba(158, 201, 255, ${0.18 * pulse})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.stroke();
+    // Rotating cardinal ticks (sky-fixed)
+    const dirs = [
+      { name: "N", ang: 0, gold: true },
+      { name: "E", ang: Math.PI / 2, gold: false },
+      { name: "S", ang: Math.PI, gold: false },
+      { name: "W", ang: -Math.PI / 2, gold: false },
+    ];
+    for (const d of dirs) {
+      // north-up angle: N = -π/2 in screen before world rot... 
+      // unit in north-up: N=(0,-1), E=(1,0)
+      const east = Math.sin(d.ang);
+      const north = Math.cos(d.ang);
+      let dx = east;
+      let dy = -north;
+      const cosR = Math.cos(rot);
+      const sinR = Math.sin(rot);
+      const rdx = dx * cosR - dy * sinR;
+      const rdy = dx * sinR + dy * cosR;
+      const len = Math.hypot(rdx, rdy) || 1;
+      const ux = rdx / len;
+      const uy = rdy / len;
+      ctx.strokeStyle = d.gold
+        ? `rgba(255, 220, 160, ${0.55 * pulse})`
+        : `rgba(170, 195, 230, ${0.28 * pulse})`;
+      ctx.lineWidth = d.gold ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(ux * (R - 10), uy * (R - 10));
+      ctx.lineTo(ux * R, uy * R);
+      ctx.stroke();
+      ctx.font = d.gold ? "bold 11px system-ui, sans-serif" : "10px system-ui, sans-serif";
+      ctx.fillStyle = d.gold
+        ? `rgba(255, 220, 160, ${0.7 * pulse})`
+        : `rgba(180, 200, 230, ${0.4 * pulse})`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(d.name, ux * (R + 12), uy * (R + 12));
+    }
+    // Faint heading line (nose always up = −Y)
+    ctx.strokeStyle = `rgba(232, 213, 163, ${0.35 * pulse})`;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.15);
+    ctx.lineTo(0, -R * 0.85);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /**
+   * Soft edge tick pointing toward the milky ribbon if it's off-center.
+   * Helps find Dec~+20° while slow-yawing.
+   */
+  function drawRibbonBearingCue() {
+    if (!isFlightPhase()) return;
+    const mid = project(cam.ra, 20);
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    // Transform world-projected point by same rotation as world layer
+    const rot = worldRotationRad();
+    const cosR = Math.cos(rot);
+    const sinR = Math.sin(rot);
+    let tx = cx;
+    let ty = cy;
+    let onGlass = false;
+    if (mid) {
+      const lx = mid.x - cx;
+      const ly = mid.y - cy;
+      tx = cx + lx * cosR - ly * sinR;
+      ty = cy + lx * sinR + ly * cosR;
+      onGlass =
+        tx > 24 && tx < w - 24 && ty > 24 && ty < h - 24;
+    }
+    if (onGlass) return; // ribbon already in view — label on band is enough
+
+    // Direction from center toward ribbon in screen space
+    let dx = tx - cx;
+    let dy = ty - cy;
+    // If project failed, aim by dec only (north if cam.dec < 20)
+    if (!mid) {
+      const aimNorth = cam.dec < 20;
+      // north in screen after rot
+      let ndx = 0;
+      let ndy = -1;
+      dx = ndx * cosR - ndy * sinR;
+      dy = ndx * sinR + ndy * cosR;
+      if (!aimNorth) {
+        dx = -dx;
+        dy = -dy;
+      }
+    }
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const edge = Math.min(w, h) * 0.38;
+    const ex = cx + ux * edge;
+    const ey = cy + uy * edge;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(180, 210, 255, 0.4)";
+    ctx.fillStyle = "rgba(180, 210, 255, 0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + ux * (edge - 28), cy + uy * (edge - 28));
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    // chevron
+    const px = -uy;
+    const py = ux;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - ux * 10 + px * 5, ey - uy * 10 + py * 5);
+    ctx.lineTo(ex - ux * 10 - px * 5, ey - uy * 10 - py * 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(190, 215, 255, 0.55)";
+    ctx.fillText("ribbon", ex - ux * 18, ey - uy * 18);
+    ctx.restore();
   }
 
   /**
@@ -586,10 +731,10 @@ export function createWindshield(
     if (!isFlightPhase()) return;
     const cx = w * 0.5;
     const cy = h * 0.5;
-    const len = Math.min(w, h) * 0.1;
+    const len = Math.min(w, h) * 0.09;
 
     ctx.save();
-    ctx.strokeStyle = "rgba(158, 201, 255, 0.3)";
+    ctx.strokeStyle = "rgba(158, 201, 255, 0.28)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(cx, cy, len + 10, 0, Math.PI * 2);
@@ -610,10 +755,18 @@ export function createWindshield(
     ctx.font = "12px system-ui, sans-serif";
     ctx.fillStyle = "rgba(220, 232, 255, 0.85)";
     ctx.textAlign = "center";
-    ctx.fillText(`hdg ${Math.round(heading)}° · FoV ${cam.fov.toFixed(0)}°`, cx, cy + len + 26);
+    ctx.fillText(
+      `hdg ${Math.round(heading)}° · FoV ${cam.fov.toFixed(0)}°`,
+      cx,
+      cy + len + 26
+    );
     if (Math.abs(steerInput) > 0.02) {
       ctx.fillStyle = "rgba(255, 215, 138, 0.95)";
-      ctx.fillText(steerInput > 0 ? "turning right →" : "← turning left", cx, cy + len + 42);
+      ctx.fillText(
+        steerInput > 0 ? "turning right →" : "← turning left",
+        cx,
+        cy + len + 42
+      );
     }
     ctx.restore();
   }
@@ -699,42 +852,70 @@ export function createWindshield(
 
   /**
    * The “ribbon” — soft galactic band near Dec +20°.
-   * Wider / brighter so it’s findable while yawing slowly.
+   * Pulsing glow + trail so it pops against the faded grid.
    */
-  function drawMilkyBand() {
-    const samples = 36;
-    const halfSpan = Math.max(50, cam.fov * 2.2);
+  function drawMilkyBand(t = 0) {
+    const samples = 40;
+    const halfSpan = Math.max(55, cam.fov * 2.4);
+    const breath = 0.85 + 0.15 * Math.sin(t * 0.9);
     ctx.save();
-    // Soft outer glow
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    const drawBand = (dec, width, alpha) => {
-      ctx.strokeStyle = `rgba(210, 220, 255, ${alpha})`;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      let started = false;
+
+    const collect = (dec) => {
+      const pts = [];
       for (let i = 0; i <= samples; i++) {
         const ra = cam.ra - halfSpan + (i / samples) * halfSpan * 2;
         const p = project(ra, dec);
-        if (!p) continue;
-        if (!started) {
-          ctx.moveTo(p.x, p.y);
-          started = true;
-        } else ctx.lineTo(p.x, p.y);
+        if (p) pts.push(p);
       }
-      if (started) ctx.stroke();
+      return pts;
     };
-    const baseW = Math.max(28, Math.min(w, h) * 0.09);
-    drawBand(20, baseW * 1.8, 0.06);
-    drawBand(20, baseW, 0.14);
-    drawBand(18, baseW * 0.45, 0.1);
-    drawBand(22, baseW * 0.4, 0.08);
-    // Label near band if on glass
+
+    const strokePts = (pts, width, alpha, color = "210, 220, 255") => {
+      if (pts.length < 2) return;
+      ctx.strokeStyle = `rgba(${color}, ${alpha})`;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    };
+
+    const core = collect(20);
+    const baseW = Math.max(32, Math.min(w, h) * 0.1);
+
+    // Wide outer halo (trail)
+    strokePts(core, baseW * 2.4, 0.05 * breath, "180, 200, 255");
+    strokePts(core, baseW * 1.6, 0.09 * breath, "200, 215, 255");
+    // Bright core
+    strokePts(core, baseW * 0.95, 0.2 * breath, "220, 230, 255");
+    strokePts(core, baseW * 0.35, 0.28 * breath, "235, 240, 255");
+    // Parallel wisps
+    strokePts(collect(17.5), baseW * 0.5, 0.1 * breath, "200, 210, 255");
+    strokePts(collect(22.5), baseW * 0.45, 0.09 * breath, "200, 210, 255");
+
+    // Soft sparkles along ribbon
+    for (let i = 0; i < core.length; i += 3) {
+      const p = core[i];
+      const tw = 0.5 + 0.5 * Math.sin(t * 2.2 + i * 0.7);
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 10 + tw * 8);
+      g.addColorStop(0, `rgba(230, 240, 255, ${0.12 * tw * breath})`);
+      g.addColorStop(1, "rgba(200, 220, 255, 0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 12 + tw * 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     const mid = project(cam.ra, 20);
     if (mid && mid.x > 40 && mid.x < w - 40 && mid.y > 20 && mid.y < h - 20) {
-      ctx.font = "bold 12px system-ui, sans-serif";
-      ctx.fillStyle = "rgba(200, 215, 255, 0.45)";
+      const lp = 0.7 + 0.3 * Math.sin(t * 1.5);
+      ctx.font = "bold 13px system-ui, sans-serif";
       ctx.textAlign = "center";
+      ctx.fillStyle = `rgba(12, 16, 28, ${0.35 * lp})`;
+      ctx.fillText("∽ ribbon", mid.x + 1, mid.y - baseW * 0.55 + 1);
+      ctx.fillStyle = `rgba(210, 225, 255, ${0.55 * lp})`;
       ctx.fillText("∽ ribbon", mid.x, mid.y - baseW * 0.55);
     }
     ctx.restore();
@@ -862,16 +1043,33 @@ export function createWindshield(
       const p = project(L.ra, L.dec);
       if (!p) continue;
       const pulse =
-        0.75 + 0.25 * Math.sin(t * 1.1 * L.pulse + L.tw);
+        0.7 + 0.3 * Math.sin(t * 1.35 * L.pulse + L.tw);
       // Keep anchors readable even at wide cruise FoV
-      const base = Math.max(32, 56 * L.size * (p.scale / 40));
+      const base = Math.max(34, 60 * L.size * (p.scale / 40));
       const hue = L.hue;
+
+      // Shared outer pulse ring — easy to catch while yawing
+      const ringR = base * (1.15 + 0.2 * pulse);
+      ctx.strokeStyle = `hsla(${hue}, 70%, 70%, ${0.2 + 0.25 * pulse})`;
+      ctx.lineWidth = 1.5 + pulse;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      // Soft halo under every kind
+      const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, ringR * 1.5);
+      halo.addColorStop(0, `hsla(${hue}, 75%, 65%, ${0.14 * pulse})`);
+      halo.addColorStop(0.55, `hsla(${hue}, 60%, 50%, ${0.06 * pulse})`);
+      halo.addColorStop(1, `hsla(${hue}, 50%, 40%, 0)`);
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ringR * 1.5, 0, Math.PI * 2);
+      ctx.fill();
 
       if (L.kind === "nebula") {
         const r = base * 1.6;
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-        g.addColorStop(0, `hsla(${hue}, 70%, 62%, ${0.22 * pulse})`);
-        g.addColorStop(0.45, `hsla(${hue + 20}, 55%, 45%, ${0.12 * pulse})`);
+        g.addColorStop(0, `hsla(${hue}, 70%, 62%, ${0.28 * pulse})`);
+        g.addColorStop(0.45, `hsla(${hue + 20}, 55%, 45%, ${0.16 * pulse})`);
         g.addColorStop(1, `hsla(${hue}, 50%, 30%, 0)`);
         ctx.fillStyle = g;
         ctx.beginPath();
@@ -1122,18 +1320,38 @@ export function createWindshield(
     }
   }
 
-  function drawVignette() {
+  function drawVignette(t = 0) {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    // Depth vignette — darker corners, open center for ribbon
     const g = ctx.createRadialGradient(
-      w * 0.5,
-      h * 0.4,
-      Math.min(w, h) * 0.2,
-      w * 0.5,
-      h * 0.5,
-      Math.max(w, h) * 0.7
+      cx,
+      cy * 0.95,
+      Math.min(w, h) * 0.18,
+      cx,
+      cy,
+      Math.max(w, h) * 0.72
     );
     g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, "rgba(0,0,0,0.45)");
+    g.addColorStop(0.55, "rgba(0,0,0,0.12)");
+    g.addColorStop(1, "rgba(0,0,0,0.55)");
     ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    // Soft cool edge glow (cockpit glass depth)
+    const edgePulse = 0.9 + 0.1 * Math.sin(t * 0.7);
+    const edge = ctx.createRadialGradient(
+      cx,
+      cy,
+      Math.min(w, h) * 0.38,
+      cx,
+      cy,
+      Math.max(w, h) * 0.68
+    );
+    edge.addColorStop(0, "rgba(120, 160, 220, 0)");
+    edge.addColorStop(0.7, `rgba(80, 120, 180, ${0.04 * edgePulse})`);
+    edge.addColorStop(1, `rgba(40, 70, 120, ${0.12 * edgePulse})`);
+    ctx.fillStyle = edge;
     ctx.fillRect(0, 0, w, h);
 
     if (throttle > 0.15 && (phase === "FLIGHT" || phase === "MYSTERY")) {
