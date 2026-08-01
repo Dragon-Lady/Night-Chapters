@@ -14,14 +14,14 @@ const BOOT = {
   heading: 90,
 };
 
-const MAX_DEG_PER_SEC = 10;
-const MIN_DEG_PER_SEC = 1.4;
+const MAX_DEG_PER_SEC = 14;
+const MIN_DEG_PER_SEC = 2.2;
 /** Max yaw rate while holding A/D (°/s) */
-const MAX_YAW_DEG_PER_SEC = 75;
-const FIELD_STAR_N = 420;
-const NEAR_STAR_N = 90;
-const NEBULA_N = 7;
-const CLOUD_N = 10;
+const MAX_YAW_DEG_PER_SEC = 80;
+const FIELD_STAR_N = 720;
+const NEAR_STAR_N = 140;
+const NEBULA_N = 12;
+const CLOUD_N = 14;
 
 export function createWindshield(
   containerSelector = "#sky-canvas",
@@ -63,6 +63,11 @@ export function createWindshield(
   let lastPaint = 0;
   let panVelX = 0;
   let panVelY = 0;
+  /** Last time glideStep advanced cam (paintLoop catch-up if game rAF stalls) */
+  let lastAdvanceAt = 0;
+  /** Cumulative screen scroll for fixed-pattern dust (extra visible pan) */
+  let dustOx = 0;
+  let dustOy = 0;
 
   function whenReady(fn) {
     if (ready) fn(null);
@@ -226,11 +231,73 @@ export function createWindshield(
     const scale = w / fov; // px per degree horizontal
     const x = w * 0.5 + dRa * scale;
     const y = h * 0.5 - dDec * scale;
-    const margin = Math.max(w, h) * 0.35;
+    // Keep projecting well outside glass so stars stream onto screen
+    const margin = Math.max(w, h) * 0.85;
     if (x < -margin || x > w + margin || y < -margin || y > h + margin) {
       return null;
     }
-    return { x, y, scale };
+    return { x, y, scale, dRa, dDec };
+  }
+
+  /**
+   * Advance RA/Dec from throttle + heading (shared by glideStep and paint catch-up).
+   * @returns {{ dRa:number, dDec:number, movedDeg:number, dxPx:number, dyPx:number }}
+   */
+  function advanceCam(dt) {
+    const t = throttle;
+    const steer = Math.max(-1, Math.min(1, steerInput || 0));
+    if (Math.abs(steer) > 0.02) {
+      heading = (heading + steer * MAX_YAW_DEG_PER_SEC * dt + 360) % 360;
+    }
+
+    const maxDegPerSec =
+      t <= 0.02
+        ? 0
+        : MIN_DEG_PER_SEC + t * (MAX_DEG_PER_SEC - MIN_DEG_PER_SEC);
+    const stepDeg = maxDegPerSec * dt;
+
+    const prevRa = cam.ra;
+    const prevDec = cam.dec;
+    let dRa = 0;
+    let dDec = 0;
+
+    if (t > 0.02 && stepDeg > 0) {
+      const rad = (heading * Math.PI) / 180;
+      const cosDec = Math.cos((cam.dec * Math.PI) / 180) || 1;
+      const moveEast = Math.cos(rad) * stepDeg;
+      const moveNorth = Math.sin(rad) * stepDeg;
+      dRa = cosDec !== 0 ? moveEast / cosDec : 0;
+      dDec = moveNorth;
+    }
+
+    if (dRa !== 0 || dDec !== 0) {
+      let nRa = cam.ra + dRa;
+      let nDec = cam.dec + dDec;
+      nRa = ((nRa % 360) + 360) % 360;
+      nDec = Math.max(-89.5, Math.min(89.5, nDec));
+      if (nDec !== cam.dec + dDec) {
+        heading = (360 - heading + 360) % 360;
+      }
+      cam.ra = nRa;
+      cam.dec = nDec;
+    }
+
+    const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
+    const dRaMove = wrapDeltaRa(cam.ra - prevRa);
+    const dDecMove = cam.dec - prevDec;
+    const scale = Math.max(1, w) / Math.max(2, cam.fov);
+    const dxPx = -dRaMove * cosFx * scale;
+    const dyPx = dDecMove * scale;
+    // Dust layer scrolls with sky (features move opposite cam)
+    dustOx = (dustOx + dxPx) % 256;
+    dustOy = (dustOy + dyPx) % 256;
+    if (dt > 0) {
+      panVelX = panVelX * 0.2 + (dxPx / dt) * 0.8;
+      panVelY = panVelY * 0.2 + (dyPx / dt) * 0.8;
+    }
+    const movedDeg = Math.hypot(dRaMove * cosFx, dDecMove);
+    lastAdvanceAt = performance.now();
+    return { dRa: dRaMove, dDec: dDecMove, movedDeg, dxPx, dyPx };
   }
 
   function paintLoop(ts) {
@@ -242,30 +309,47 @@ export function createWindshield(
       resize();
       return;
     }
+    // If game-loop didn't call glideStep recently, still advance cam so the
+    // glass never freezes while throttle is up.
+    const now = performance.now();
+    const flying =
+      throttle > 0.02 || Math.abs(steerInput) > 0.02;
+    if (flying && now - lastAdvanceAt > 28) {
+      advanceCam(dt);
+      publishCam();
+    }
     paint(dt, ts);
   }
 
   function paint(dt, ts) {
     const t = ts * 0.001;
-    // Background
     drawAtmosphere();
+    drawDustLayer();
     drawMilkyBand();
     drawNebulae();
     drawFieldStars(t);
     drawClouds(t);
     drawNearStars(dt, t);
+    drawCoordGrid();
     drawOverlays();
     drawVignette();
   }
 
   function drawAtmosphere() {
+    // Shift glow with camera so the whole sky “slides,” not only stars
+    const fov = Math.max(2, cam.fov);
+    const ox = ((cam.ra % 40) / 40 - 0.5) * w * 0.08;
+    const oy = (cam.dec / 90) * h * 0.06;
+    const cx = w * 0.5 + ox;
+    const cy = h * 0.42 + oy;
+
     const g = ctx.createRadialGradient(
-      w * 0.5,
-      h * 0.42,
+      cx,
+      cy,
       0,
       w * 0.5,
       h * 0.5,
-      Math.max(w, h) * 0.72
+      Math.max(w, h) * 0.75
     );
     const sat = weatherMood === "cold" ? 48 : weatherMood === "warm" ? 52 : 42;
     const topHue =
@@ -276,8 +360,10 @@ export function createWindshield(
           : weatherMood === "cold"
             ? 205
             : skyHue;
-    const core = `hsla(${topHue + skyWarmth * 20}, ${sat}%, ${10 + skyWarmth * 8}%, 1)`;
-    const mid = `hsla(${skyHue}, ${sat}%, 7%, 1)`;
+    // Hue drifts with RA so long pans change the sky color
+    const hueShift = (cam.ra * 0.15) % 40;
+    const core = `hsla(${topHue + skyWarmth * 20 + hueShift}, ${sat}%, ${11 + skyWarmth * 8}%, 1)`;
+    const mid = `hsla(${skyHue + hueShift * 0.5}, ${sat}%, 7%, 1)`;
     const edge = "#03040a";
     g.addColorStop(0, core);
     g.addColorStop(0.45, mid);
@@ -285,7 +371,6 @@ export function createWindshield(
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // Soft horizon glow
     const hg = ctx.createLinearGradient(0, h * 0.55, 0, h);
     hg.addColorStop(0, "rgba(0,0,0,0)");
     const hCol =
@@ -299,24 +384,86 @@ export function createWindshield(
     ctx.fillRect(0, 0, w, h);
   }
 
+  /** Dense dust that scrolls in screen space — obvious pan cue */
+  function drawDustLayer() {
+    const cell = 48;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    for (let yy = -cell; yy < h + cell; yy += cell) {
+      for (let xx = -cell; xx < w + cell; xx += cell) {
+        const px = xx + dustOx;
+        const py = yy + dustOy;
+        const fx = ((px % cell) + cell) % cell;
+        const fy = ((py % cell) + cell) % cell;
+        const x = xx + fx * 0.15;
+        const y = yy + fy * 0.15;
+        const n = hash01(Math.floor(px / cell), Math.floor(py / cell));
+        if (n < 0.35) continue;
+        const r = 0.4 + n * 1.2;
+        ctx.fillStyle =
+          n > 0.85
+            ? `rgba(255, 230, 200, ${0.25 + n * 0.4})`
+            : `rgba(200, 220, 255, ${0.2 + n * 0.35})`;
+        ctx.beginPath();
+        ctx.arc(x + n * cell * 0.5, y + (1 - n) * cell * 0.5, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
   function drawMilkyBand() {
-    // Soft galactic ribbon that scrolls with RA
     const fov = Math.max(2, cam.fov);
     const scale = w / fov;
-    const bandDec = 20; // band center
-    const y0 = h * 0.5 - (bandDec - cam.dec) * scale * 0.35;
-    const tilt = Math.sin((cam.ra * Math.PI) / 180) * 0.12;
+    const bandDec = 20;
+    const y0 = h * 0.5 - (bandDec - cam.dec) * scale * 0.55;
+    const xShift = -wrapDeltaRa(cam.ra - 90) * scale * 0.08;
+    const tilt = Math.sin((cam.ra * Math.PI) / 180) * 0.18;
 
     ctx.save();
-    ctx.translate(w * 0.5, y0);
+    ctx.translate(w * 0.5 + xShift, y0);
     ctx.rotate(tilt);
-    const band = ctx.createLinearGradient(0, -h * 0.15, 0, h * 0.15);
-    const a = weatherMood === "cold" ? 0.14 : 0.1;
+    const band = ctx.createLinearGradient(0, -h * 0.18, 0, h * 0.18);
+    const a = weatherMood === "cold" ? 0.18 : 0.14;
     band.addColorStop(0, "rgba(180,200,255,0)");
     band.addColorStop(0.5, `rgba(200, 210, 255, ${a})`);
     band.addColorStop(1, "rgba(180,200,255,0)");
     ctx.fillStyle = band;
-    ctx.fillRect(-w, -h * 0.2, w * 2, h * 0.4);
+    ctx.fillRect(-w * 1.2, -h * 0.22, w * 2.4, h * 0.44);
+    ctx.restore();
+  }
+
+  /** Faint RA/Dec grid — makes pan/turn obvious */
+  function drawCoordGrid() {
+    const fov = Math.max(2, cam.fov);
+    const scale = w / fov;
+    const step = fov > 12 ? 10 : fov > 6 ? 5 : 2;
+    ctx.save();
+    ctx.strokeStyle = "rgba(140, 170, 220, 0.12)";
+    ctx.lineWidth = 1;
+    // Vertical lines = constant RA
+    const ra0 = Math.floor(cam.ra / step) * step - step * 4;
+    for (let i = 0; i < 12; i++) {
+      const ra = ra0 + i * step;
+      const p = project(ra, cam.dec);
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.moveTo(p.x, 0);
+      ctx.lineTo(p.x, h);
+      ctx.stroke();
+    }
+    // Horizontal lines = constant Dec
+    const dec0 = Math.floor(cam.dec / step) * step - step * 4;
+    for (let i = 0; i < 12; i++) {
+      const dec = dec0 + i * step;
+      if (dec < -90 || dec > 90) continue;
+      const p = project(cam.ra, dec);
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.moveTo(0, p.y);
+      ctx.lineTo(w, p.y);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -349,22 +496,22 @@ export function createWindshield(
   }
 
   function drawFieldStars(t) {
-    const gliding = throttle > 0.04 && (phase === "FLIGHT" || phase === "MYSTERY");
+    const gliding = throttle > 0.04;
+    const speedMag = Math.hypot(panVelX, panVelY);
     for (const s of fieldStars) {
       const p = project(s.ra, s.dec);
       if (!p) continue;
       const tw = 0.55 + 0.45 * Math.sin(t * 1.4 + s.tw);
-      const alpha = s.a * tw * (gliding ? 0.95 + throttle * 0.2 : 0.85);
+      const alpha = s.a * tw * (gliding ? 1 : 0.88);
       const col = s.warm ? "255, 230, 195" : "210, 225, 255";
-      // Streak when gliding (opposite to pan direction of sky)
-      if (gliding && throttle > 0.25 && s.z > 0.9) {
-        const len = 4 + throttle * 14 * s.z;
-        const mag = Math.hypot(panVelX, panVelY) || 1;
-        // Features move opposite to cam motion; streaks trail behind
+      // Long streaks while moving — primary “we're flying” cue
+      if (gliding && speedMag > 8 && s.z > 0.55) {
+        const len = 6 + Math.min(48, speedMag * 0.04) * s.z + throttle * 18;
+        const mag = speedMag || 1;
         const sx = panVelX / mag;
         const sy = panVelY / mag;
-        ctx.strokeStyle = `rgba(${col}, ${alpha * 0.4})`;
-        ctx.lineWidth = Math.max(0.6, s.r * 0.5);
+        ctx.strokeStyle = `rgba(${col}, ${alpha * 0.55})`;
+        ctx.lineWidth = Math.max(0.7, s.r * 0.65);
         ctx.beginPath();
         ctx.moveTo(p.x - sx * len, p.y - sy * len);
         ctx.lineTo(p.x, p.y);
@@ -372,7 +519,7 @@ export function createWindshield(
       }
       ctx.beginPath();
       ctx.fillStyle = `rgba(${col}, ${alpha})`;
-      ctx.arc(p.x, p.y, s.r * (gliding ? 1 + throttle * 0.15 : 1), 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, s.r * (gliding ? 1.15 : 1), 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -405,26 +552,27 @@ export function createWindshield(
   }
 
   function drawNearStars(dt, t) {
-    // Parallax layer in screen space — scrolls with pan velocity
-    const gliding = throttle > 0.04 && (phase === "FLIGHT" || phase === "MYSTERY");
+    const gliding = throttle > 0.04;
+    const speedMag = Math.hypot(panVelX, panVelY);
     for (const s of nearStars) {
-      if (gliding) {
-        s.x += panVelX * dt * s.z * 0.85;
-        s.y += panVelY * dt * s.z * 0.85;
+      // Always apply pan velocity when flying (strong parallax)
+      if (gliding || speedMag > 4) {
+        s.x += panVelX * dt * (0.5 + s.z);
+        s.y += panVelY * dt * (0.5 + s.z);
       }
-      if (s.x < -6) s.x = w + 6;
-      if (s.x > w + 6) s.x = -6;
-      if (s.y < -6) s.y = h + 6;
-      if (s.y > h + 6) s.y = -6;
+      if (s.x < -8) s.x = w + 8;
+      if (s.x > w + 8) s.x = -8;
+      if (s.y < -8) s.y = h + 8;
+      if (s.y > h + 8) s.y = -8;
 
       const tw = 0.55 + 0.45 * Math.sin(t * 2 + s.tw);
-      const alpha = s.a * tw * 0.55;
+      const alpha = s.a * tw * 0.7;
       const col = s.warm ? "255, 230, 190" : "200, 220, 255";
-      if (gliding && throttle > 0.35) {
-        const len = 6 + throttle * 20 * s.z;
-        const mag = Math.hypot(panVelX, panVelY) || 1;
-        ctx.strokeStyle = `rgba(${col}, ${alpha * 0.5})`;
-        ctx.lineWidth = 0.8;
+      if (gliding && speedMag > 6) {
+        const len = 10 + Math.min(60, speedMag * 0.05) * s.z;
+        const mag = speedMag || 1;
+        ctx.strokeStyle = `rgba(${col}, ${alpha * 0.6})`;
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(s.x - (panVelX / mag) * len, s.y - (panVelY / mag) * len);
         ctx.lineTo(s.x, s.y);
@@ -432,13 +580,12 @@ export function createWindshield(
       }
       ctx.beginPath();
       ctx.fillStyle = `rgba(${col}, ${alpha})`;
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, s.r * 1.1, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Decay pan velocity when not gliding
     if (!gliding) {
-      panVelX *= 0.9;
-      panVelY *= 0.9;
+      panVelX *= 0.88;
+      panVelY *= 0.88;
     }
   }
 
@@ -559,7 +706,9 @@ export function createWindshield(
     if (hard) {
       lastGlideSpeed = 0;
       setMotionBlur(0);
-      throttle = 0;
+      // Do NOT zero throttle here — Begin sets session throttle then glides
+      panVelX = 0;
+      panVelY = 0;
     }
     publishCam();
   }
@@ -582,8 +731,8 @@ export function createWindshield(
   }
 
   /**
-   * Each rAF: apply steer (heading) + throttle (move along heading).
-   * `target` is still used for distance / arrival / optional FoV — not forced path.
+   * Each rAF from game-loop: set throttle, advance cam, return dist to target.
+   * Paint loop also catch-up advances if this isn't called in time.
    */
   function glideStep(target, thr = 0.35, dtSec = 1 / 60) {
     const t = Math.max(0, Math.min(1, Number(thr) || 0));
@@ -596,61 +745,21 @@ export function createWindshield(
       Number.isFinite(Number(target.dec));
 
     let dist = 0;
-    let dRaTo = 0;
-    let dDecTo = 0;
     let bearingTo = null;
     if (hasTarget) {
       const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
-      dRaTo = wrapDeltaRa(Number(target.ra) - cam.ra) * cos;
-      dDecTo = Number(target.dec) - cam.dec;
+      const dRaTo = wrapDeltaRa(Number(target.ra) - cam.ra) * cos;
+      const dDecTo = Number(target.dec) - cam.dec;
       dist = Math.hypot(dRaTo, dDecTo);
       if (dist > 1e-6) {
         bearingTo = ((Math.atan2(dDecTo, dRaTo) * 180) / Math.PI + 360) % 360;
       }
     }
 
-    // —— Steering: yaw heading from held A/D · ←/→ ——
-    const steer = Math.max(-1, Math.min(1, steerInput || 0));
-    if (Math.abs(steer) > 0.02) {
-      heading = (heading + steer * MAX_YAW_DEG_PER_SEC * dt + 360) % 360;
-    }
+    // Advance camera every glideStep (primary path)
+    const moved = advanceCam(dt);
 
-    // —— Throttle: move along current heading (free flight) ——
-    const maxDegPerSec =
-      t <= 0.02
-        ? 0
-        : MIN_DEG_PER_SEC + t * (MAX_DEG_PER_SEC - MIN_DEG_PER_SEC);
-    const stepDeg = maxDegPerSec * dt;
-
-    const prevRa = cam.ra;
-    const prevDec = cam.dec;
-    let dRa = 0;
-    let dDec = 0;
-
-    if (t > 0.02 && stepDeg > 0) {
-      const rad = (heading * Math.PI) / 180;
-      // Local sky plane: +RA (east) · +Dec (north), RA scaled by cos(dec)
-      const cosDec = Math.cos((cam.dec * Math.PI) / 180) || 1;
-      const moveEast = Math.cos(rad) * stepDeg; // degrees of true sky angle east
-      const moveNorth = Math.sin(rad) * stepDeg;
-      dRa = cosDec !== 0 ? moveEast / cosDec : 0;
-      dDec = moveNorth;
-    }
-
-    if (dRa !== 0 || dDec !== 0) {
-      let nRa = cam.ra + dRa;
-      let nDec = cam.dec + dDec;
-      nRa = ((nRa % 360) + 360) % 360;
-      nDec = Math.max(-89.5, Math.min(89.5, nDec));
-      // Soft bounce near poles — reverse north/south component of heading
-      if (nDec !== cam.dec + dDec) {
-        heading = (360 - heading + 360) % 360;
-      }
-      cam.ra = nRa;
-      cam.dec = nDec;
-    }
-
-    // Soft FoV toward pin when near, else gentle cruise open
+    // Soft FoV toward pin when near
     if (hasTarget && target.fov != null && Number.isFinite(Number(target.fov))) {
       const tFov = Math.max(5.5, Number(target.fov));
       if (dist < 8) {
@@ -660,21 +769,8 @@ export function createWindshield(
       cam.fov = Math.min(10, cam.fov + 1.5 * dt);
     }
 
-    // Screen-space velocity for near-star parallax
-    const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
-    const dRaMove = wrapDeltaRa(cam.ra - prevRa);
-    const dDecMove = cam.dec - prevDec;
-    const scale = w / Math.max(2, cam.fov);
-    const dxPx = -dRaMove * cosFx * scale;
-    const dyPx = dDecMove * scale;
-    if (dt > 0) {
-      panVelX = panVelX * 0.25 + (dxPx / dt) * 0.75;
-      panVelY = panVelY * 0.25 + (dyPx / dt) * 0.75;
-    }
-
-    const movedDeg = Math.hypot(dRaMove * cosFx, dDecMove);
     const speed =
-      t > 0.04 && movedDeg > 0.0002
+      t > 0.04 && moved.movedDeg > 0.0002
         ? Math.min(1, t)
         : t > 0.04
           ? t * 0.35
@@ -683,7 +779,7 @@ export function createWindshield(
     setMotionBlur(lastGlideSpeed);
     publishCam();
 
-    // Heading error vs bug (for instruments)
+    const steer = Math.max(-1, Math.min(1, steerInput || 0));
     let headingErr = null;
     if (bearingTo != null) {
       headingErr = wrapDeltaRa(bearingTo - heading);
@@ -691,9 +787,9 @@ export function createWindshield(
 
     try {
       window.__ncGlide = {
-        dRa,
-        dDec,
-        movedDeg,
+        dRa: moved.dRa,
+        dDec: moved.dDec,
+        movedDeg: moved.movedDeg,
         applied: true,
         dist,
         thr: t,
@@ -702,8 +798,8 @@ export function createWindshield(
         bearingTo,
         headingErr,
         path: "canvas",
-        dxPx,
-        dyPx,
+        dxPx: moved.dxPx,
+        dyPx: moved.dyPx,
         t: performance.now(),
       };
     } catch {
@@ -717,11 +813,11 @@ export function createWindshield(
       distDeg: dist,
       speed: lastGlideSpeed,
       applied: true,
-      movedDeg,
-      dRa,
-      dDec,
-      dxPx,
-      dyPx,
+      movedDeg: moved.movedDeg,
+      dRa: moved.dRa,
+      dDec: moved.dDec,
+      dxPx: moved.dxPx,
+      dyPx: moved.dyPx,
       heading,
       steer,
       bearingTo,

@@ -69,7 +69,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.6.1";
+export const CORE_LOOP_VERSION = "1.6.2";
 
 const State = {
   BOOT: "BOOT",
@@ -1400,6 +1400,52 @@ export function startGame(ui) {
     );
   }
 
+  function instrumentsScrollEl() {
+    return (
+      document.getElementById("instruments-body") ||
+      document.querySelector(".instruments-body")
+    );
+  }
+
+  function isInInstruments(el) {
+    if (!el || !el.closest) return false;
+    return !!el.closest("#instruments, .instruments, #instruments-body");
+  }
+
+  /** Arrow keys scroll the bottom panel when it's focused or panel is open on menu */
+  function tryScrollInstruments(e, k, code) {
+    const body = instrumentsScrollEl();
+    if (!body) return false;
+    const collapsed = document.body.classList.contains("panel-collapsed");
+    if (collapsed) return false;
+    const canScroll = body.scrollHeight > body.clientHeight + 4;
+    if (!canScroll) return false;
+
+    const focusInPanel = isInInstruments(e.target) || isInInstruments(document.activeElement);
+    const menuLike =
+      state === State.MENU ||
+      state === State.BOOT ||
+      state === State.CLOSEOUT ||
+      !session;
+    // Scroll when focus is in panel, or when not in free-flight control mode
+    if (!focusInPanel && !menuLike && !(e.shiftKey && session)) return false;
+
+    const step = e.shiftKey ? 96 : 48;
+    let dy = 0;
+    if (k === "ArrowDown" || code === "ArrowDown" || k === "PageDown") dy = step;
+    else if (k === "ArrowUp" || code === "ArrowUp" || k === "PageUp") dy = -step;
+    else if (k === "Home") {
+      body.scrollTop = 0;
+      return true;
+    } else if (k === "End") {
+      body.scrollTop = body.scrollHeight;
+      return true;
+    } else return false;
+
+    body.scrollTop += dy;
+    return true;
+  }
+
   function onKeyDown(e) {
     const tag = (e.target && e.target.tagName) || "";
     const type = (e.target && e.target.type) || "";
@@ -1416,6 +1462,7 @@ export function startGame(ui) {
     const code = e.code || "";
     const k = e.key || "";
     const flying = !!(session && ACTIVE.has(state));
+    const inPanel = isInInstruments(e.target);
 
     if (flying || state === State.MENU || state === State.CLOSEOUT) {
       if (tag === "CANVAS") {
@@ -1424,31 +1471,52 @@ export function startGame(ui) {
         } catch {
           /* ignore */
         }
-        focusShell();
+        if (!inPanel) focusShell();
       }
     }
 
-    // Steer — held state; rAF applies continuous yaw
+    // Bottom panel scroll (arrows / page keys) when panel has focus or on menu
+    if (
+      !isTyping &&
+      (k === "ArrowUp" ||
+        k === "ArrowDown" ||
+        k === "PageUp" ||
+        k === "PageDown" ||
+        k === "Home" ||
+        k === "End" ||
+        code === "ArrowUp" ||
+        code === "ArrowDown")
+    ) {
+      if (tryScrollInstruments(e, k, code)) {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Steer — held state; rAF applies continuous yaw (A/D always; ←/→ when not scrolling panel)
     if (flying && (isSteerLeft(k, code) || isSteerRight(k, code))) {
-      e.preventDefault();
-      if (isSteerLeft(k, code)) heldSteer.left = true;
-      if (isSteerRight(k, code)) heldSteer.right = true;
-      syncSteerInput();
-      return;
+      // Left/right arrows: prefer panel scroll when focus in instruments
+      if (inPanel && (k === "ArrowLeft" || k === "ArrowRight" || code === "ArrowLeft" || code === "ArrowRight")) {
+        /* fall through to default if needed */
+      } else {
+        e.preventDefault();
+        if (isSteerLeft(k, code)) heldSteer.left = true;
+        if (isSteerRight(k, code)) heldSteer.right = true;
+        syncSteerInput();
+        return;
+      }
     }
 
     const throttleUp =
       k === "w" ||
       k === "W" ||
       code === "KeyW" ||
-      k === "ArrowUp" ||
-      code === "ArrowUp";
+      ((k === "ArrowUp" || code === "ArrowUp") && !inPanel);
     const throttleDown =
       k === "s" ||
       k === "S" ||
       code === "KeyS" ||
-      k === "ArrowDown" ||
-      code === "ArrowDown";
+      ((k === "ArrowDown" || code === "ArrowDown") && !inPanel);
 
     if (flying && (throttleUp || throttleDown)) {
       e.preventDefault();
@@ -1595,6 +1663,30 @@ export function startGame(ui) {
   document.getElementById("fb-panel")?.addEventListener("click", () => {
     armKeyboard("fb-panel");
     togglePanel();
+  });
+
+  // Instruments panel: click to focus so arrows scroll the body
+  const instBody = document.getElementById("instruments-body");
+  if (instBody) {
+    instBody.tabIndex = 0;
+    instBody.setAttribute(
+      "aria-label",
+      "Instruments panel. Arrow keys scroll. Click to focus."
+    );
+    instBody.addEventListener(
+      "wheel",
+      (e) => {
+        // Ensure wheel scrolls this panel even if nested targets capture
+        if (instBody.scrollHeight <= instBody.clientHeight) return;
+        instBody.scrollTop += e.deltaY;
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+  }
+  document.getElementById("instruments")?.addEventListener("click", (e) => {
+    if (e.target.closest("button, input, a, select, textarea, label")) return;
+    instBody?.focus({ preventScroll: true });
   });
 
   boot();
