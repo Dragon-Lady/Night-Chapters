@@ -736,6 +736,7 @@ export function startGame(ui) {
     }
 
     renderMeters();
+    updateFlightBar();
   }
 
   function onArrivePin(wp) {
