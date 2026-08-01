@@ -69,7 +69,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.6.2";
+export const CORE_LOOP_VERSION = "1.6.3";
 
 const State = {
   BOOT: "BOOT",
@@ -1004,7 +1004,13 @@ export function startGame(ui) {
     bar.setAttribute("aria-hidden", show ? "false" : "true");
     const thr = document.getElementById("flight-throttle-readout");
     if (thr && session) {
-      thr.textContent = `${Math.round((session.throttle || 0) * 100)}%`;
+      const hdg =
+        typeof windshield.getHeading === "function"
+          ? Math.round(windshield.getHeading())
+          : null;
+      const thrPct = Math.round((session.throttle || 0) * 100);
+      thr.textContent =
+        hdg != null ? `${thrPct}% · ${hdg}°` : `${thrPct}%`;
     }
   }
 
@@ -1412,7 +1418,12 @@ export function startGame(ui) {
     return !!el.closest("#instruments, .instruments, #instruments-body");
   }
 
-  /** Arrow keys scroll the bottom panel when it's focused or panel is open on menu */
+  /**
+   * Arrow keys scroll the bottom instruments panel when:
+   * - focus is inside the panel, or
+   * - Shift is held, or
+   * - we're on the menu (not flying)
+   */
   function tryScrollInstruments(e, k, code) {
     const body = instrumentsScrollEl();
     if (!body) return false;
@@ -1421,28 +1432,33 @@ export function startGame(ui) {
     const canScroll = body.scrollHeight > body.clientHeight + 4;
     if (!canScroll) return false;
 
-    const focusInPanel = isInInstruments(e.target) || isInInstruments(document.activeElement);
+    const focusInPanel =
+      isInInstruments(e.target) || isInInstruments(document.activeElement);
     const menuLike =
       state === State.MENU ||
       state === State.BOOT ||
       state === State.CLOSEOUT ||
       !session;
-    // Scroll when focus is in panel, or when not in free-flight control mode
-    if (!focusInPanel && !menuLike && !(e.shiftKey && session)) return false;
+    const shiftScroll = !!e.shiftKey;
+    if (!focusInPanel && !menuLike && !shiftScroll) return false;
 
-    const step = e.shiftKey ? 96 : 48;
+    // Only vertical scroll with up/down/page (left/right left for steer when flying)
+    const step = e.shiftKey ? 96 : 52;
     let dy = 0;
     if (k === "ArrowDown" || code === "ArrowDown" || k === "PageDown") dy = step;
     else if (k === "ArrowUp" || code === "ArrowUp" || k === "PageUp") dy = -step;
     else if (k === "Home") {
       body.scrollTop = 0;
+      e.preventDefault();
       return true;
     } else if (k === "End") {
       body.scrollTop = body.scrollHeight;
+      e.preventDefault();
       return true;
     } else return false;
 
     body.scrollTop += dy;
+    e.preventDefault();
     return true;
   }
 
@@ -1656,6 +1672,29 @@ export function startGame(ui) {
     armKeyboard("fb-down");
     nudgeThrottle(-1);
   });
+  // Flight-bar steer hold (same as A/D)
+  function bindSteerButton(id, side) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const down = (e) => {
+      e.preventDefault();
+      armKeyboard(`fb-steer-${side}`);
+      if (side === "left") heldSteer.left = true;
+      else heldSteer.right = true;
+      syncSteerInput();
+    };
+    const up = () => {
+      if (side === "left") heldSteer.left = false;
+      else heldSteer.right = false;
+      syncSteerInput();
+    };
+    btn.addEventListener("pointerdown", down);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointerleave", up);
+    btn.addEventListener("pointercancel", up);
+  }
+  bindSteerButton("fb-steer-left", "left");
+  bindSteerButton("fb-steer-right", "right");
   document.getElementById("fb-menu")?.addEventListener("click", () => {
     armKeyboard("fb-menu");
     abortToMenu();

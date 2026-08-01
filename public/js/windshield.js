@@ -35,8 +35,12 @@ export function createWindshield(
   let cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
   /** Flight bearing degrees: 0 = +RA, 90 = +Dec */
   let heading = BOOT.heading;
-  /** Continuous steer input −1..+1 (left/right held keys) */
+  /** Continuous steer input −1..+1 (merged from game-loop + local keys) */
   let steerInput = 0;
+  /** Game-loop steer (optional); local keys always tracked here too */
+  let gameSteer = 0;
+  const keySteer = { left: false, right: false };
+  let flightKeysBound = false;
   let lastGlideSpeed = 0;
   let w = 0;
   let h = 0;
@@ -106,6 +110,7 @@ export function createWindshield(
     seedUniverse();
     resize();
     window.addEventListener("resize", resize);
+    bindFlightKeys();
 
     running = true;
     lastPaint = 0;
@@ -239,13 +244,151 @@ export function createWindshield(
     return { x, y, scale, dRa, dDec };
   }
 
+  function isFlightPhase() {
+    return (
+      phase === "FLIGHT" ||
+      phase === "MYSTERY" ||
+      phase === "ARRIVE" ||
+      phase === "REST"
+    );
+  }
+
+  function isTextTarget(el) {
+    if (!el || !el.tagName) return false;
+    const tag = el.tagName;
+    const type = el.type || "";
+    return (
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      (tag === "INPUT" &&
+        type !== "range" &&
+        type !== "button" &&
+        type !== "checkbox" &&
+        type !== "radio" &&
+        type !== "submit")
+    );
+  }
+
+  function isInInstrumentsEl(el) {
+    return !!(el && el.closest && el.closest("#instruments, .instruments, #instruments-body"));
+  }
+
+  function codeIsSteerLeft(e) {
+    const c = e.code || "";
+    const k = e.key || "";
+    return (
+      c === "KeyA" ||
+      k === "a" ||
+      k === "A" ||
+      c === "ArrowLeft" ||
+      k === "ArrowLeft"
+    );
+  }
+
+  function codeIsSteerRight(e) {
+    const c = e.code || "";
+    const k = e.key || "";
+    return (
+      c === "KeyD" ||
+      k === "d" ||
+      k === "D" ||
+      c === "ArrowRight" ||
+      k === "ArrowRight"
+    );
+  }
+
+  /** Merge game-loop + local key state → steerInput −1..1 */
+  function recomputeSteer() {
+    const fromKeys = (keySteer.right ? 1 : 0) - (keySteer.left ? 1 : 0);
+    const fromGame = Math.max(-1, Math.min(1, gameSteer || 0));
+    // Prefer any non-zero source (keys win on tie for responsiveness)
+    if (fromKeys !== 0) steerInput = fromKeys;
+    else steerInput = fromGame;
+    try {
+      window.__ncSteer = {
+        steerInput,
+        keySteer: { ...keySteer },
+        gameSteer,
+        heading,
+        phase,
+      };
+    } catch {
+      /* ignore */
+    }
+  }
+
   /**
-   * Advance RA/Dec from throttle + heading (shared by glideStep and paint catch-up).
-   * @returns {{ dRa:number, dDec:number, movedDeg:number, dxPx:number, dyPx:number }}
+   * Own capture listeners so A/D · ←/→ always reach the glass,
+   * even if game-loop key path is blocked.
+   */
+  function bindFlightKeys() {
+    if (flightKeysBound || typeof window === "undefined") return;
+    flightKeysBound = true;
+
+    const onDown = (e) => {
+      if (!isFlightPhase()) return;
+      if (isTextTarget(e.target)) return;
+      // Arrows while focus in instruments → let panel scroll (don't steer)
+      if (
+        isInInstrumentsEl(e.target) &&
+        (e.code === "ArrowLeft" ||
+          e.code === "ArrowRight" ||
+          e.key === "ArrowLeft" ||
+          e.key === "ArrowRight")
+      ) {
+        return;
+      }
+      let hit = false;
+      if (codeIsSteerLeft(e)) {
+        keySteer.left = true;
+        hit = true;
+      }
+      if (codeIsSteerRight(e)) {
+        keySteer.right = true;
+        hit = true;
+      }
+      if (hit) {
+        recomputeSteer();
+        // Immediate yaw kick so turn is felt on first frame (not only after hold)
+        if (!e.repeat) {
+          const kick = keySteer.right && !keySteer.left ? 1 : keySteer.left && !keySteer.right ? -1 : 0;
+          if (kick) {
+            heading = (heading + kick * 6 + 360) % 360;
+            publishCam();
+          }
+        }
+        e.preventDefault();
+      }
+    };
+
+    const onUp = (e) => {
+      let hit = false;
+      if (codeIsSteerLeft(e)) {
+        keySteer.left = false;
+        hit = true;
+      }
+      if (codeIsSteerRight(e)) {
+        keySteer.right = false;
+        hit = true;
+      }
+      if (hit) recomputeSteer();
+    };
+
+    window.addEventListener("keydown", onDown, true);
+    window.addEventListener("keyup", onUp, true);
+    document.addEventListener("keydown", onDown, true);
+    document.addEventListener("keyup", onUp, true);
+  }
+
+  /**
+   * Advance RA/Dec from throttle + heading (shared by glideStep and paint rAF).
+   * @returns {{ dRa:number, dDec:number, movedDeg:number, dxPx:number, dyPx:number, heading:number, steer:number }}
    */
   function advanceCam(dt) {
+    recomputeSteer();
     const t = throttle;
     const steer = Math.max(-1, Math.min(1, steerInput || 0));
+    // Yaw every frame while steer held
     if (Math.abs(steer) > 0.02) {
       heading = (heading + steer * MAX_YAW_DEG_PER_SEC * dt + 360) % 360;
     }
@@ -261,6 +404,7 @@ export function createWindshield(
     let dRa = 0;
     let dDec = 0;
 
+    // Move along current heading (after yaw this frame)
     if (t > 0.02 && stepDeg > 0) {
       const rad = (heading * Math.PI) / 180;
       const cosDec = Math.cos((cam.dec * Math.PI) / 180) || 1;
@@ -288,7 +432,6 @@ export function createWindshield(
     const scale = Math.max(1, w) / Math.max(2, cam.fov);
     const dxPx = -dRaMove * cosFx * scale;
     const dyPx = dDecMove * scale;
-    // Dust layer scrolls with sky (features move opposite cam)
     dustOx = (dustOx + dxPx) % 256;
     dustOy = (dustOy + dyPx) % 256;
     if (dt > 0) {
@@ -297,7 +440,15 @@ export function createWindshield(
     }
     const movedDeg = Math.hypot(dRaMove * cosFx, dDecMove);
     lastAdvanceAt = performance.now();
-    return { dRa: dRaMove, dDec: dDecMove, movedDeg, dxPx, dyPx };
+    return {
+      dRa: dRaMove,
+      dDec: dDecMove,
+      movedDeg,
+      dxPx,
+      dyPx,
+      heading,
+      steer,
+    };
   }
 
   function paintLoop(ts) {
@@ -309,12 +460,24 @@ export function createWindshield(
       resize();
       return;
     }
-    // If game-loop didn't call glideStep recently, still advance cam so the
-    // glass never freezes while throttle is up.
+    recomputeSteer();
+    // Catch-up only if game-loop missed frames (glideStep is primary).
+    // Threshold >1 frame so we never double-integrate with glideStep.
     const now = performance.now();
-    const flying =
-      throttle > 0.02 || Math.abs(steerInput) > 0.02;
-    if (flying && now - lastAdvanceAt > 28) {
+    const wantsAdvance =
+      isFlightPhase() &&
+      (throttle > 0.02 || Math.abs(steerInput) > 0.02);
+    if (wantsAdvance && now - lastAdvanceAt > 40) {
+      advanceCam(dt);
+      publishCam();
+    }
+    // Steer-only yaw when throttle idle: still turn the nose every paint
+    else if (
+      isFlightPhase() &&
+      Math.abs(steerInput) > 0.02 &&
+      throttle <= 0.02 &&
+      now - lastAdvanceAt > 14
+    ) {
       advanceCam(dt);
       publishCam();
     }
@@ -332,7 +495,51 @@ export function createWindshield(
     drawNearStars(dt, t);
     drawCoordGrid();
     drawOverlays();
+    drawHeadingHud();
     drawVignette();
+  }
+
+  /** Compass / heading pip — makes A/D turns obvious */
+  function drawHeadingHud() {
+    if (!isFlightPhase()) return;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const rad = (heading * Math.PI) / 180;
+    // Screen: +x right, +y down. Sky: 0°=+RA (right on screen when facing north…),
+    // map heading so 90° (north/+Dec) points up (negative y).
+    const len = Math.min(w, h) * 0.12;
+    const sx = Math.cos(rad - Math.PI / 2);
+    const sy = Math.sin(rad - Math.PI / 2);
+
+    ctx.save();
+    // Outer ring
+    ctx.strokeStyle = "rgba(158, 201, 255, 0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, len + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    // Nose line
+    ctx.strokeStyle = "rgba(232, 213, 163, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + sx * len, cy + sy * len);
+    ctx.stroke();
+    // Tip
+    ctx.fillStyle = "rgba(232, 213, 163, 0.95)";
+    ctx.beginPath();
+    ctx.arc(cx + sx * len, cy + sy * len, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Label
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillStyle = "rgba(220, 232, 255, 0.75)";
+    ctx.textAlign = "center";
+    ctx.fillText(`hdg ${Math.round(heading)}°`, cx, cy + len + 28);
+    if (Math.abs(steerInput) > 0.02) {
+      ctx.fillStyle = "rgba(255, 215, 138, 0.85)";
+      ctx.fillText(steerInput > 0 ? "→ turn" : "← turn", cx, cy + len + 42);
+    }
+    ctx.restore();
   }
 
   function drawAtmosphere() {
@@ -667,14 +874,17 @@ export function createWindshield(
   }
 
   /**
-   * Steer input −1 (left) … +1 (right). Held keys update every frame via game-loop.
+   * Steer input −1 (left) … +1 (right) from game-loop.
+   * Merged with windshield's own A/D · ←/→ capture listeners.
    */
   function setSteer(v) {
     const n = Number(v);
-    steerInput = Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0;
+    gameSteer = Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0;
+    recomputeSteer();
   }
 
   function getSteer() {
+    recomputeSteer();
     return steerInput;
   }
 

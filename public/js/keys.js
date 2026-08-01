@@ -89,11 +89,18 @@ export function ensureKeySink() {
     );
     sink.className = "nc-key-sink";
     document.body.appendChild(sink);
-    // Direct listener on the sink (in addition to window capture)
+    // Direct listeners on the sink (keydown + keyup for held steer)
     sink.addEventListener(
       "keydown",
       (e) => {
         dispatch(e);
+      },
+      true
+    );
+    sink.addEventListener(
+      "keyup",
+      (e) => {
+        dispatchUp(e);
       },
       true
     );
