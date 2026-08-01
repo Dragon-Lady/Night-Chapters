@@ -264,56 +264,52 @@ export function createWindshield(
   }
 
   /**
-   * Project RA/Dec → screen. Heading-aligned:
-   *   sky "forward" (heading) maps to UP on the glass,
-   *   sky "right" (heading−90°) maps to RIGHT.
-   * So changing heading yaws the entire sky (not only the HUD dial).
+   * North-up projection into pre-rotation canvas space.
+   * World layer is then rotated so flight heading points UP on the glass.
+   * east → +x, north → −y (before heading rotate).
    */
   function project(ra, dec) {
     const fov = Math.max(2, cam.fov);
     const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
-    // Local sky plane offsets in degrees (east, north)
     const east = wrapDeltaRa(ra - cam.ra) * cos;
     const north = dec - cam.dec;
-
-    const rad = (heading * Math.PI) / 180;
-    // Forward unit in (east, north): heading 0° = east, 90° = north
-    const fwdE = Math.cos(rad);
-    const fwdN = Math.sin(rad);
-    // Right = forward rotated −90°: (sin, −cos)
-    const rightE = Math.sin(rad);
-    const rightN = -Math.cos(rad);
-
-    const alongRight = east * rightE + north * rightN;
-    const alongFwd = east * fwdE + north * fwdN;
-
     const scale = w / fov;
-    // Screen: +x right, +y down → forward is −y
-    const x = w * 0.5 + alongRight * scale;
-    const y = h * 0.5 - alongFwd * scale;
-
-    const margin = Math.max(w, h) * 0.85;
+    const x = w * 0.5 + east * scale;
+    const y = h * 0.5 - north * scale;
+    // Large margin — after canvas rotate, corners still need coverage
+    const margin = Math.max(w, h) * 1.2;
     if (x < -margin || x > w + margin || y < -margin || y > h + margin) {
       return null;
     }
-    return { x, y, scale, east, north, alongRight, alongFwd };
+    return { x, y, scale, east, north };
   }
 
-  /** Convert a sky-plane (east,north) delta to screen pixels (same rotation as project). */
-  function skyDeltaToScreen(eastDeg, northDeg) {
+  /**
+   * Screen velocity of world features (after heading rotation).
+   * Translation opposite cam motion, plus spin from yaw.
+   */
+  function skyDeltaToScreen(eastDeg, northDeg, yawDeg = 0) {
     const fov = Math.max(2, cam.fov);
     const scale = Math.max(1, w) / fov;
-    const rad = (heading * Math.PI) / 180;
-    const fwdE = Math.cos(rad);
-    const fwdN = Math.sin(rad);
-    const rightE = Math.sin(rad);
-    const rightN = -Math.cos(rad);
-    const alongRight = eastDeg * rightE + northDeg * rightN;
-    const alongFwd = eastDeg * fwdE + northDeg * fwdN;
-    return {
-      dx: alongRight * scale,
-      dy: -alongFwd * scale,
-    };
+    // North-up delta first
+    let dx = eastDeg * scale;
+    let dy = -northDeg * scale;
+    // Apply same rotation as world layer: rot = heading - 90°
+    const rot = ((heading - 90) * Math.PI) / 180;
+    const c = Math.cos(rot);
+    const s = Math.sin(rot);
+    const rdx = dx * c - dy * s;
+    const rdy = dx * s + dy * c;
+    // Yaw spin: features orbit opposite to nose turn
+    const yawRad = (yawDeg * Math.PI) / 180;
+    const spin = Math.min(w, h) * 0.4 * yawRad;
+    return { dx: rdx + spin, dy: rdy };
+  }
+
+  /** Degrees to rotate world so heading points up (north-up → heading-up). */
+  function worldRotationRad() {
+    // north-up has north = up. We want heading = up → rotate by (heading - 90°)
+    return ((heading - 90) * Math.PI) / 180;
   }
 
   function isFlightPhase() {
@@ -498,21 +494,14 @@ export function createWindshield(
       cam.dec = nDec;
     }
 
-    // Screen-space velocity for streaks / dust (heading-aligned)
+    // Screen-space velocity for streaks / dust (matches rotated world)
     const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
     const dRaMove = wrapDeltaRa(cam.ra - prevRa);
     const dDecMove = cam.dec - prevDec;
     const eastMove = dRaMove * cosFx;
     const northMove = dDecMove;
-    // Features move opposite camera translation
-    let scr = skyDeltaToScreen(-eastMove, -northMove);
-    // Pure yaw also spins the field: approximate with tangential dust motion
-    if (Math.abs(yawApplied) > 0.001) {
-      const yawRad = (yawApplied * Math.PI) / 180;
-      // Screen-space swirl (counter-rotate with yaw so FOV feels locked to nose)
-      const swirl = Math.min(w, h) * 0.35 * yawRad;
-      scr = { dx: scr.dx + swirl, dy: scr.dy };
-    }
+    // Features move opposite camera translation; yaw spins them too
+    const scr = skyDeltaToScreen(-eastMove, -northMove, -yawApplied);
     const dxPx = scr.dx;
     const dyPx = scr.dy;
     dustOx = (dustOx + dxPx) % 256;
@@ -546,11 +535,9 @@ export function createWindshield(
       return;
     }
     recomputeSteer();
-    // Sole integrator: one advanceCam per paint frame (never with glideStep)
-    if (
-      isFlightPhase() &&
-      (throttle > 0.02 || Math.abs(steerInput) > 0.02)
-    ) {
+    // Sole integrator: yaw heading + throttle translate every paint frame
+    recomputeSteer();
+    if (isFlightPhase() && (throttle > 0.02 || Math.abs(steerInput) > 0.02)) {
       advanceCam(dt);
       publishCam();
     }
@@ -559,23 +546,35 @@ export function createWindshield(
 
   function paint(dt, ts) {
     const t = ts * 0.001;
+    // Static backdrop (doesn't need yaw — pure black depth)
     drawAtmosphere();
+
+    // —— World layer: rotate entire sky so heading = UP ——
+    // A/D changes heading → this rotation turns anchors/stars every frame.
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(worldRotationRad());
+    ctx.translate(-cx, -cy);
     drawDustLayer();
     drawMilkyBand();
     drawNebulae();
     drawLandmarks(t);
     drawFieldStars(t);
     drawClouds(t);
-    drawNearStars(dt, t);
     drawCoordGrid();
     drawOverlays();
+    ctx.restore();
+
+    // Screen-space layers (not rotated)
+    drawNearStars(dt, t);
     drawHeadingHud();
     drawVignette();
   }
 
   /**
-   * Nose is always UP on the glass (heading-aligned projection).
-   * HUD is a fixed forward pip + heading readout.
+   * Nose always UP (world is rotated under us). Pip fixed; hdg number updates.
    */
   function drawHeadingHud() {
     if (!isFlightPhase()) return;
@@ -584,35 +583,31 @@ export function createWindshield(
     const len = Math.min(w, h) * 0.1;
 
     ctx.save();
-    // Outer ring
     ctx.strokeStyle = "rgba(158, 201, 255, 0.3)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(cx, cy, len + 10, 0, Math.PI * 2);
     ctx.stroke();
-    // Forward always up
-    ctx.strokeStyle = "rgba(232, 213, 163, 0.9)";
-    ctx.fillStyle = "rgba(232, 213, 163, 0.9)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(232, 213, 163, 0.95)";
+    ctx.fillStyle = "rgba(232, 213, 163, 0.95)";
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(cx, cy + 4);
     ctx.lineTo(cx, cy - len);
     ctx.stroke();
-    // Arrow tip
     ctx.beginPath();
     ctx.moveTo(cx, cy - len - 2);
-    ctx.lineTo(cx - 5, cy - len + 8);
-    ctx.lineTo(cx + 5, cy - len + 8);
+    ctx.lineTo(cx - 6, cy - len + 9);
+    ctx.lineTo(cx + 6, cy - len + 9);
     ctx.closePath();
     ctx.fill();
-    // Label
-    ctx.font = "11px system-ui, sans-serif";
-    ctx.fillStyle = "rgba(220, 232, 255, 0.8)";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillStyle = "rgba(220, 232, 255, 0.85)";
     ctx.textAlign = "center";
-    ctx.fillText(`hdg ${Math.round(heading)}° · nose up`, cx, cy + len + 26);
+    ctx.fillText(`hdg ${Math.round(heading)}°`, cx, cy + len + 26);
     if (Math.abs(steerInput) > 0.02) {
-      ctx.fillStyle = "rgba(255, 215, 138, 0.9)";
-      ctx.fillText(steerInput > 0 ? "yaw →" : "← yaw", cx, cy + len + 40);
+      ctx.fillStyle = "rgba(255, 215, 138, 0.95)";
+      ctx.fillText(steerInput > 0 ? "turning right →" : "← turning left", cx, cy + len + 42);
     }
     ctx.restore();
   }
