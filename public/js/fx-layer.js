@@ -1,10 +1,11 @@
 /**
  * Lightweight flight FX — starfield + soft cloud wisps on a canvas over the glass.
- * Vanilla JS only. Driven by throttle / phase for wonder, not spectacle overload.
+ * Star drift is driven by the SAME cam delta as Aladin (setCamDelta), so streaks
+ * match throttle / glide. Vanilla JS only.
  */
 
-const STAR_N = 48;
-const CLOUD_N = 7;
+const STAR_N = 72;
+const CLOUD_N = 8;
 
 export function createFxLayer(canvas) {
   if (!canvas) return null;
@@ -18,14 +19,18 @@ export function createFxLayer(canvas) {
   let running = true;
   let raf = 0;
   let last = 0;
-  let skyHue = 220; // blue-night default
-  let skyWarmth = 0; // 0 cool → 1 gold (mystery)
+  let skyHue = 220;
+  let skyWarmth = 0;
   let starDensity = 1;
   let cloudDensity = 1;
   let weatherMood = "rain";
-  /** Accumulated parallax from Aladin cam motion (px) */
-  let panX = 0;
-  let panY = 0;
+
+  /** Cam-linked velocity (px/sec) — smoothed from setCamDelta */
+  let velX = 0;
+  let velY = 0;
+  /** Last frame cam delta (px) for streak direction */
+  let lastDx = 0;
+  let lastDy = 0;
 
   function resize() {
     const parent = canvas.parentElement;
@@ -43,22 +48,24 @@ export function createFxLayer(canvas) {
   }
 
   function seed() {
+    const n = Math.round(STAR_N * starDensity);
     stars = [];
-    for (let i = 0; i < STAR_N; i++) {
+    for (let i = 0; i < n; i++) {
       stars.push({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        z: 0.3 + Math.random() * 1.2,
-        r: 0.4 + Math.random() * 1.6,
-        a: 0.25 + Math.random() * 0.75,
+        x: Math.random() * Math.max(1, w),
+        y: Math.random() * Math.max(1, h),
+        z: 0.25 + Math.random() * 1.4,
+        r: 0.5 + Math.random() * 1.8,
+        a: 0.3 + Math.random() * 0.7,
         tw: Math.random() * Math.PI * 2,
-        warm: Math.random() > 0.82,
+        warm: Math.random() > 0.8,
       });
     }
     clouds = [];
-    for (let i = 0; i < CLOUD_N; i++) {
+    const cn = Math.max(2, Math.round(CLOUD_N * cloudDensity));
+    for (let i = 0; i < cn; i++) {
       clouds.push({
-        x: Math.random() * w,
+        x: Math.random() * Math.max(1, w),
         y: h * (0.15 + Math.random() * 0.7),
         s: 40 + Math.random() * 90,
         a: 0.03 + Math.random() * 0.06,
@@ -78,45 +85,65 @@ export function createFxLayer(canvas) {
   }
 
   /**
-   * Pan starfield by screen pixels (from Aladin cam delta).
-   * Makes throttle motion obvious even when HiPS tiles are dark/slow.
+   * Apply one frame of Aladin cam motion (pixels).
+   * Same delta used for sky pointTo — stars streak with throttle.
+   * @param {number} dxPx
+   * @param {number} dyPx
+   * @param {number} dtSec
+   * @param {number} [thr]
    */
+  function setCamDelta(dxPx, dyPx, dtSec = 1 / 60, thr = throttle) {
+    const dx = Number(dxPx) || 0;
+    const dy = Number(dyPx) || 0;
+    const dt = Math.max(0.001, Number(dtSec) || 1 / 60);
+    lastDx = dx;
+    lastDy = dy;
+    // Smooth velocity (px/sec)
+    const vx = dx / dt;
+    const vy = dy / dt;
+    velX = velX * 0.35 + vx * 0.65;
+    velY = velY * 0.35 + vy * 0.65;
+    if (thr != null) throttle = Math.max(0, Math.min(1, thr));
+
+    // Immediate pan so motion is frame-synced with Aladin
+    if (!stars.length && w > 1) seed();
+    applyPan(dx, dy);
+  }
+
   function panBy(dx, dy) {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    panX += dx;
-    panY += dy;
-    // Apply immediately to star positions so motion is frame-synced
+    applyPan(Number(dx) || 0, Number(dy) || 0);
+  }
+
+  function applyPan(dx, dy) {
     if (!stars.length) return;
     for (const s of stars) {
-      s.x += dx * (0.35 + s.z * 0.65);
-      s.y += dy * (0.35 + s.z * 0.65);
-      // wrap
-      if (s.x < -4) s.x = w + 4;
-      if (s.x > w + 4) s.x = -4;
-      if (s.y < -4) s.y = h + 4;
-      if (s.y > h + 4) s.y = -4;
+      const k = 0.4 + s.z * 0.75;
+      s.x += dx * k;
+      s.y += dy * k;
+      wrapStar(s);
     }
     for (const c of clouds) {
-      c.x += dx * 0.25;
-      c.y += dy * 0.15;
+      c.x += dx * 0.28;
+      c.y += dy * 0.16;
       if (c.x < -c.s * 2) c.x = w + c.s;
       if (c.x > w + c.s * 2) c.x = -c.s;
     }
   }
 
-  /** Shift ambient hue from view (ra/dec) — subtle, not disco */
+  function wrapStar(s) {
+    if (s.x < -6) s.x = w + 6;
+    if (s.x > w + 6) s.x = -6;
+    if (s.y < -6) s.y = h + 6;
+    if (s.y > h + 6) s.y = -6;
+  }
+
   function setSkyFromView(view) {
     if (!view) return;
-    // map RA → hue drift, dec → cool/warm lean (biased by weather base)
     const base = skyHue;
     skyHue = base * 0.7 + (200 + ((view.ra || 0) % 360) * (40 / 360)) * 0.3;
     if (view.dec < 0) skyHue += 4;
   }
 
-  /**
-   * Chapter sky profile from night.sky / weather_mood.
-   * @param {{mood?,hue?,warmth?,starDensity?,cloudDensity?}|string} sky
-   */
   function setWeather(sky) {
     if (!sky) return;
     if (typeof sky === "string") {
@@ -134,33 +161,7 @@ export function createFxLayer(canvas) {
     if (sky.warmth != null) skyWarmth = sky.warmth;
     starDensity = sky.starDensity ?? 1;
     cloudDensity = sky.cloudDensity ?? 1;
-    // reseed particle counts lightly
-    if (w > 0) {
-      const targetStars = Math.round(STAR_N * starDensity);
-      while (stars.length < targetStars) {
-        stars.push({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          z: 0.3 + Math.random() * 1.2,
-          r: 0.4 + Math.random() * 1.6,
-          a: 0.25 + Math.random() * 0.75,
-          tw: Math.random() * Math.PI * 2,
-          warm: weatherMood === "warm" || weatherMood === "rose" || Math.random() > 0.7,
-        });
-      }
-      if (stars.length > targetStars) stars.length = targetStars;
-      const targetClouds = Math.max(2, Math.round(CLOUD_N * cloudDensity));
-      while (clouds.length < targetClouds) {
-        clouds.push({
-          x: Math.random() * w,
-          y: h * (0.15 + Math.random() * 0.7),
-          s: 40 + Math.random() * 90,
-          a: 0.03 + Math.random() * 0.06,
-          v: 0.08 + Math.random() * 0.2,
-        });
-      }
-      if (clouds.length > targetClouds) clouds.length = targetClouds;
-    }
+    if (w > 0) seed();
     const stage = document.getElementById("sky-stage");
     if (stage) stage.dataset.weather = weatherMood;
   }
@@ -170,28 +171,40 @@ export function createFxLayer(canvas) {
     raf = requestAnimationFrame(tick);
     const dt = last ? Math.min(0.05, (ts - last) / 1000) : 0.016;
     last = ts;
-    if (w < 2 || h < 2) return;
+    if (w < 2 || h < 2) {
+      resize();
+      if (w < 2) return;
+    }
+    if (!stars.length) seed();
 
-    const glide = throttle > 0.04 && (phase === "FLIGHT" || phase === "MYSTERY");
-    const speed = glide ? 20 + throttle * 90 : 4;
+    const flying =
+      throttle > 0.04 &&
+      (phase === "FLIGHT" || phase === "MYSTERY" || phase === "ARRIVE");
+    const speedMag = Math.hypot(velX, velY);
+    // Glide if cam is moving OR throttle is up while flying
+    const glide = flying && (throttle > 0.04 || speedMag > 8);
 
-    // clear
+    // Decay velocity when no new cam deltas arrive
+    velX *= 0.92;
+    velY *= 0.92;
+    if (Math.abs(velX) < 0.5) velX = 0;
+    if (Math.abs(velY) < 0.5) velY = 0;
+
     ctx.clearRect(0, 0, w, h);
 
-    // soft sky veil (color shift by weather)
+    // soft sky veil
     const g = ctx.createRadialGradient(w * 0.5, h * 0.35, 0, w * 0.5, h * 0.5, h * 0.75);
     const sat = weatherMood === "cold" ? 55 : weatherMood === "warm" ? 50 : 45;
-    const cool = `hsla(${skyHue}, ${sat}%, 12%, 0.22)`;
+    const cool = `hsla(${skyHue}, ${sat}%, 12%, 0.18)`;
     const warmHue =
       weatherMood === "rose" ? 330 : weatherMood === "warm" ? 30 : 35 + skyHue * 0.05;
-    const warm = `hsla(${warmHue}, 55%, 18%, ${0.12 + skyWarmth * 0.2})`;
+    const warm = `hsla(${warmHue}, 55%, 18%, ${0.1 + skyWarmth * 0.18})`;
     g.addColorStop(0, warm);
     g.addColorStop(0.55, cool);
-    g.addColorStop(1, "rgba(0,0,0,0.35)");
+    g.addColorStop(1, "rgba(0,0,0,0.28)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    // clouds (density varies by chapter)
     const cloudTint =
       weatherMood === "warm"
         ? "255, 210, 170"
@@ -200,11 +213,16 @@ export function createFxLayer(canvas) {
           : weatherMood === "cold"
             ? "160, 200, 240"
             : "180, 200, 230";
+
+    // Residual cam-velocity drift for clouds (setCamDelta already applied frame pan)
+    const residual = glide ? 0.12 : 0;
     for (const c of clouds) {
-      if (glide) c.x -= c.v * speed * dt * 8;
+      c.x += velX * dt * residual * 0.4;
+      c.y += velY * dt * residual * 0.25;
       if (c.x < -c.s * 2) c.x = w + c.s;
+      if (c.x > w + c.s * 2) c.x = -c.s;
       const grd = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.s);
-      grd.addColorStop(0, `rgba(${cloudTint}, ${c.a * (glide ? 1.3 : 1)})`);
+      grd.addColorStop(0, `rgba(${cloudTint}, ${c.a * (glide ? 1.35 : 1)})`);
       grd.addColorStop(1, `rgba(${cloudTint}, 0)`);
       ctx.fillStyle = grd;
       ctx.beginPath();
@@ -212,45 +230,72 @@ export function createFxLayer(canvas) {
       ctx.fill();
     }
 
-    // stars
-    for (const s of stars) {
-      s.tw += dt * (1.2 + s.z);
-      if (glide) {
-        s.x -= speed * s.z * dt * 12;
-        s.y += Math.sin(s.tw * 0.3) * throttle * 4 * dt;
-      }
-      if (s.x < -4) {
-        s.x = w + 4;
-        s.y = Math.random() * h;
-      }
-      const twinkle = 0.55 + 0.45 * Math.sin(s.tw);
-      const alpha = s.a * twinkle * (glide ? 0.9 + throttle * 0.35 : 0.75);
-      ctx.beginPath();
-      ctx.fillStyle = s.warm
-        ? `rgba(255, 230, 190, ${alpha})`
-        : `rgba(210, 225, 255, ${alpha})`;
-      ctx.arc(s.x, s.y, s.r * (glide ? 1 + throttle * 0.25 : 1), 0, Math.PI * 2);
-      ctx.fill();
-      // tiny streak when gliding faster
-      if (glide && throttle > 0.45 && s.z > 0.9) {
-        ctx.strokeStyle = s.warm
-          ? `rgba(255, 230, 190, ${alpha * 0.35})`
-          : `rgba(200, 220, 255, ${alpha * 0.3})`;
-        ctx.lineWidth = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(s.x + throttle * 10 * s.z, s.y);
-        ctx.stroke();
+    // Unit direction of motion for streaks (prefer last frame delta)
+    let streakDx = lastDx;
+    let streakDy = lastDy;
+    if (Math.hypot(streakDx, streakDy) < 0.2 && speedMag > 1) {
+      streakDx = velX * dt;
+      streakDy = velY * dt;
+    }
+    // If still almost zero but throttle high, invent leftward cruise streak
+    if (glide && Math.hypot(streakDx, streakDy) < 0.15 && throttle > 0.2) {
+      streakDx = -(8 + throttle * 40) * dt;
+      streakDy = 0;
+      // Keep stars crawling when cam delta is tiny but throttle is up
+      for (const s of stars) {
+        s.x += streakDx * (0.5 + s.z);
+        wrapStar(s);
       }
     }
 
-    // motion-blur vignette edges (subtle)
-    if (glide && throttle > 0.2) {
-      const blurA = 0.04 + throttle * 0.1;
+    const streakLen = glide
+      ? Math.min(90, 12 + throttle * 50 + Math.hypot(streakDx, streakDy) * 1.8)
+      : 0;
+
+    for (const s of stars) {
+      s.tw += dt * (1.2 + s.z);
+
+      // Residual velocity crawl (cam delta already applied in setCamDelta)
+      if (glide && residual > 0) {
+        s.x += velX * dt * residual * s.z;
+        s.y += velY * dt * residual * s.z * 0.6;
+        wrapStar(s);
+      }
+
+      const twinkle = 0.55 + 0.45 * Math.sin(s.tw);
+      const alpha = s.a * twinkle * (glide ? 0.95 + throttle * 0.4 : 0.75);
+      const col = s.warm
+        ? `255, 230, 190`
+        : `210, 225, 255`;
+
+      // Streaks along cam motion (opposite to pan so they trail behind)
+      if (glide && streakLen > 4 && s.z > 0.45) {
+        const len = streakLen * (0.35 + s.z * 0.65);
+        const mag = Math.hypot(streakDx, streakDy) || 1;
+        // Trail behind motion direction
+        const tx = -(streakDx / mag) * len;
+        const ty = -(streakDy / mag) * len;
+        ctx.strokeStyle = `rgba(${col}, ${alpha * 0.55})`;
+        ctx.lineWidth = Math.max(0.7, s.r * (0.6 + throttle * 0.5));
+        ctx.beginPath();
+        ctx.moveTo(s.x + tx, s.y + ty);
+        ctx.lineTo(s.x, s.y);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(${col}, ${alpha})`;
+      ctx.arc(s.x, s.y, s.r * (glide ? 1 + throttle * 0.35 : 1), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // motion-blur side vignette
+    if (glide && throttle > 0.15) {
+      const blurA = 0.05 + throttle * 0.12;
       const vg = ctx.createLinearGradient(0, 0, w, 0);
       vg.addColorStop(0, `rgba(5, 8, 16, ${blurA})`);
-      vg.addColorStop(0.15, "rgba(5, 8, 16, 0)");
-      vg.addColorStop(0.85, "rgba(5, 8, 16, 0)");
+      vg.addColorStop(0.12, "rgba(5, 8, 16, 0)");
+      vg.addColorStop(0.88, "rgba(5, 8, 16, 0)");
       vg.addColorStop(1, `rgba(5, 8, 16, ${blurA})`);
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, w, h);
@@ -281,5 +326,6 @@ export function createFxLayer(canvas) {
     setSkyFromView,
     setWeather,
     panBy,
+    setCamDelta,
   };
 }

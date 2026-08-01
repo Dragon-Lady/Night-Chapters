@@ -68,7 +68,7 @@ import {
   ensureKeySink,
 } from "./keys.js";
 
-export const CORE_LOOP_VERSION = "1.4.8";
+export const CORE_LOOP_VERSION = "1.4.9";
 
 const State = {
   BOOT: "BOOT",
@@ -367,6 +367,7 @@ export function startGame(ui) {
   /**
    * Push current throttle into Aladin immediately (don't wait for rAF).
    * Called from W/S keys, slider input, and flight-bar buttons.
+   * Must call glideStep/throttleKick so pointTo + FX cam delta fire now.
    */
   function applyThrottleToSky(reason = "") {
     if (!session || !night || !windshield.ready) return;
@@ -379,18 +380,18 @@ export function startGame(ui) {
       if (state === State.REST) leaveRestIfNeeded();
       if (state === State.ARRIVE) setState(State.FLIGHT);
       const wp = currentWaypoint(night, session);
-      if (wp?.view) {
-        // Immediate visual step so key/slider feels connected to the sky
-        if (typeof windshield.throttleKick === "function") {
-          step = windshield.throttleKick(wp.view, thr, 1 / 30);
-        } else {
-          step = windshield.glideStep(wp.view, thr, 1 / 30);
-        }
-        // Belt-and-suspenders: force one more cam apply after kick
-        windshield.applyCam?.(true);
+      const target = wp?.view || null;
+      // Immediate visual step: cam + gotoRaDec/pointTo + FX streaks
+      if (typeof windshield.throttleKick === "function") {
+        step = windshield.throttleKick(target, thr, 1 / 24);
+      } else {
+        step = windshield.glideStep(target, thr, 1 / 24);
       }
+      // Force another Aladin paint with current cam
+      windshield.applyCam?.(true);
     } else {
       windshield.fx?.setThrottle(0);
+      windshield.fx?.setCamDelta?.(0, 0, 1 / 60, 0);
       windshield.setMotionBlur?.(0);
     }
     try {
@@ -400,6 +401,7 @@ export function startGame(ui) {
         reason,
         cam: windshield.cam,
         step,
+        path: window.__ncCam?.path,
         t: performance.now(),
       };
     } catch {
@@ -722,7 +724,7 @@ export function startGame(ui) {
       }
     }
 
-    // FLIGHT + MYSTERY: live glide — throttle drives sky motion
+    // FLIGHT + MYSTERY: live glide — throttle drives Aladin + FX every rAF
     const thr = Number(session.throttle || 0);
     const canGlide =
       (state === State.FLIGHT || state === State.MYSTERY) &&
@@ -732,12 +734,15 @@ export function startGame(ui) {
 
     if (canGlide) {
       const wp = currentWaypoint(night, session);
+      // No waypoint left → closeout, but still nudge sky if somehow mid-flight
       if (!wp) {
+        // Final cruise step so last throttle still moves glass, then close
+        windshield.glideStep(null, thr, dt);
         beginCloseout();
         return;
       }
 
-      // dt-aware glide → wasm.setCenter every frame (see windshield.glideStep)
+      // Every frame: cam delta → gotoRaDec/pointTo + FX setCamDelta
       const step = windshield.glideStep(wp.view, thr, dt);
       windshield.fx?.setThrottle(thr);
       try {
@@ -746,6 +751,20 @@ export function startGame(ui) {
         /* ignore */
       }
       if (typeof ui?.onGlide === "function") ui.onGlide(step, wp);
+
+      // Debug sample for console (lightweight)
+      try {
+        window.__ncGlide = {
+          movedDeg: step?.movedDeg,
+          applied: step?.applied,
+          dist: step?.distDeg,
+          thr,
+          path: window.__ncCam?.path,
+          t: performance.now(),
+        };
+      } catch {
+        /* ignore */
+      }
 
       // —— Drift mysteries appear during glide ——
       const view = { ra: step.ra, dec: step.dec };
@@ -771,7 +790,6 @@ export function startGame(ui) {
         state === State.MYSTERY &&
         wp.kind !== "mystery"
       ) {
-        // left drift field; return to flight unless chapter mystery
         session.activeDriftId = null;
         session.mysteryNear = false;
         setState(State.FLIGHT);
@@ -794,8 +812,16 @@ export function startGame(ui) {
       }
     } else if (state === State.FLIGHT || state === State.MYSTERY) {
       windshield.fx?.setThrottle(session?.throttle || 0);
-      audio.setWind(session.resting ? 0 : session?.throttle || 0);
-      if (session.resting) windshield.setMotionBlur?.(0);
+      // Even at idle throttle, clear cam velocity so streaks stop
+      if (session.resting || thr <= 0.04) {
+        windshield.fx?.setCamDelta?.(0, 0, dt, 0);
+        windshield.setMotionBlur?.(0);
+      }
+      try {
+        audio.setWind(session.resting ? 0 : session?.throttle || 0);
+      } catch {
+        /* ignore */
+      }
     }
 
     renderMeters();
@@ -897,14 +923,21 @@ export function startGame(ui) {
       lowSpoonsWhispered = false;
       resumeState = State.FLIGHT;
       // Start with readable throttle so sky moves immediately
-      const t0 = Math.max(0.35, Number(el.throttle()?.value || 0.35));
+      const t0 = Math.max(0.4, Number(el.throttle()?.value || 0.4));
       if (el.throttle()) el.throttle().value = String(t0);
       setThrottle(session, t0);
       // Depart from first pin already "visited" so we don't park in ARRIVE
       // and block glide until Next — throttle can fly toward pin 2 immediately.
       if (night.pins?.length) {
         const first = night.pins[0];
-        if (first?.view) windshield.goto(first.view, { hard: true });
+        if (first?.view) {
+          // Wide cruise FoV so HiPS motion is obvious
+          const startView = {
+            ...first.view,
+            fov: Math.max(5.5, Number(first.view.fov) || 5.5),
+          };
+          windshield.goto(startView, { hard: true });
+        }
         session.pinIndex = 0;
         // Mark start pin lightly without ARRIVE lock
         if (!session.fixesVisited.includes(first.id)) {
@@ -916,6 +949,8 @@ export function startGame(ui) {
           session.pinIndex = 1;
         }
       }
+      // Kick sky once so Begin feels like motion starts immediately
+      applyThrottleToSky("begin");
       // Arm keys BEFORE setState (which auto-collapses panel)
       armKeyboard("pre-flight");
       setState(State.FLIGHT);

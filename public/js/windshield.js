@@ -1,10 +1,11 @@
 /**
  * Windshield — Aladin Lite as the cockpit glass.
- * Throttle → glideStep → wasm.setCenter every frame so the sky actually moves.
  *
- * Important: continuous flight must NOT call view.pointTo 60×/s (that schedules
- * progressive-catalog timeouts and can thrash rendering). Prefer wasm.setCenter
- * + requestRedraw for the live glide path.
+ * Visual path (every rAF while throttle > 0):
+ *   glideStep → mutate cam → applyCam (gotoRaDec / pointTo / wasm.setCenter)
+ *              → FX setCamDelta (stars streak with same delta)
+ *
+ * applyThrottleToSky (W/S/slider) calls throttleKick → same path immediately.
  */
 
 import { createFxLayer } from "./fx-layer.js";
@@ -12,7 +13,7 @@ import { createFxLayer } from "./fx-layer.js";
 const BOOT = {
   ra: 83.8221,
   dec: -5.3911,
-  fov: 3.5,
+  fov: 6.0,
   survey: "P/DSS2/color",
 };
 
@@ -27,12 +28,12 @@ export function createWindshield(
   let mysteryCatalog = null;
   let fx = null;
 
-  // Internal camera — source of truth for continuous glide
+  // Internal camera — sole source of truth for continuous glide
   let cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
   let lastGlideSpeed = 0;
   let lastApplyAt = 0;
   let lastFovApplied = BOOT.fov;
-  let lastCamForFx = { ra: BOOT.ra, dec: BOOT.dec };
+  let progressiveCatsOrig = null;
 
   function whenReady(fn) {
     if (ready && aladin) fn(aladin);
@@ -65,16 +66,20 @@ export function createWindshield(
       fullScreen: false,
     });
 
-    // Expose for console diagnosis
     try {
       window.__aladin = aladin;
       window.__ncCam = () => ({ ...cam });
+      window.__ncApplyCam = (force) => applyCam(!!force);
     } catch {
       /* ignore */
     }
 
     cam = { ra: BOOT.ra, dec: BOOT.dec, fov: BOOT.fov };
-    lastCamForFx = { ra: cam.ra, dec: cam.dec };
+
+    // During continuous glide, pointTo schedules progressive-cat timeouts every
+    // call. Patch to a throttled version so we can safely call pointTo each frame.
+    patchProgressiveCats();
+
     applyCam(true);
 
     try {
@@ -113,7 +118,6 @@ export function createWindshield(
     const aladinDiv = document.querySelector(containerSelector);
     if (aladinDiv) {
       aladinDiv.classList.add("aladin-glass");
-      // Never put CSS filter/transform on this node — freezes WebGL paints
       aladinDiv.style.filter = "none";
       aladinDiv.style.transform = "none";
       aladinDiv.style.willChange = "auto";
@@ -126,6 +130,29 @@ export function createWindshield(
     ready = true;
     while (waiters.length) waiters.shift()(aladin);
     return aladin;
+  }
+
+  /**
+   * pointTo schedules refreshProgressiveCats via setTimeout(1s) every call.
+   * Throttle that to once per 2s so 60fps pointTo is safe.
+   */
+  function patchProgressiveCats() {
+    const view = aladin?.view;
+    if (!view || typeof view.refreshProgressiveCats !== "function") return;
+    if (view.__ncProgPatched) return;
+    progressiveCatsOrig = view.refreshProgressiveCats.bind(view);
+    let lastCats = 0;
+    view.refreshProgressiveCats = function ncThrottledCats() {
+      const now = performance.now();
+      if (now - lastCats < 2000) return;
+      lastCats = now;
+      try {
+        progressiveCatsOrig();
+      } catch {
+        /* ignore */
+      }
+    };
+    view.__ncProgPatched = true;
   }
 
   function getView({ syncFromAladin = false } = {}) {
@@ -151,31 +178,36 @@ export function createWindshield(
     return { ...cam };
   }
 
-  /**
-   * Stop Aladin's internal animateTo / zoom hermite so they don't fight glide.
-   */
   function stopAladinAnimations() {
     if (!aladin) return;
     try {
       if (typeof aladin.stopAnimation === "function") aladin.stopAnimation();
       if (aladin.view?.zoom?.stopAnimation) aladin.view.zoom.stopAnimation();
-      if (aladin.view?.animationParams) aladin.view.animationParams.running = false;
+      if (aladin.view?.animationParams) {
+        aladin.view.animationParams.running = false;
+      }
       if (aladin.animationParams) aladin.animationParams.running = false;
+      // Kill any residual pan/inertia that would fight programmatic center
+      if (aladin.view) {
+        aladin.view.pan = null;
+        aladin.view.dragging = false;
+        aladin.view.realDragging = false;
+      }
     } catch {
       /* ignore */
     }
   }
 
   /**
-   * Push cam into Aladin WASM view.
-   * Live glide uses wasm.setCenter (cheap). Hard jumps use pointTo/gotoRaDec.
-   * @param {boolean} force  skip rate limit / use full public API
+   * Push cam into Aladin so the sky actually re-renders.
+   * Uses the full public path (gotoRaDec → view.pointTo → wasm.setCenter)
+   * plus needRedraw so WebGL paints the new center every frame.
    */
   function applyCam(force = false) {
     if (!aladin) return false;
     const now = performance.now();
-    // ~60 pushes/sec for continuous glide; always allow force
-    if (!force && now - lastApplyAt < 12) return false;
+    // Live glide always passes force=true; rate-limit only soft calls
+    if (!force && now - lastApplyAt < 10) return false;
     lastApplyAt = now;
 
     const ra = Number(cam.ra);
@@ -183,48 +215,56 @@ export function createWindshield(
     const fov = Number(cam.fov);
     if (!Number.isFinite(ra) || !Number.isFinite(dec)) return false;
 
+    let path = "none";
     let ok = false;
+
     try {
       stopAladinAnimations();
+      patchProgressiveCats();
 
       const view = aladin.view;
       const wasm = view?.wasm;
 
-      // Fast continuous path: wasm.setCenter — no progressive-cat setTimeout thrash
-      if (wasm && typeof wasm.setCenter === "function") {
-        if (view.viewCenter) {
-          view.viewCenter.ra = ra;
-          view.viewCenter.dec = dec;
-        } else {
-          view.viewCenter = { ra, dec };
-        }
-        wasm.setCenter(ra, dec);
+      // 1) Public API — gotoRaDec → view.pointTo → wasm.setCenter + POSITION_CHANGED
+      if (typeof aladin.gotoRaDec === "function") {
+        aladin.gotoRaDec(ra, dec);
+        path = "gotoRaDec";
         ok = true;
       } else if (view && typeof view.pointTo === "function") {
         view.pointTo(ra, dec);
-        ok = true;
-      } else if (typeof aladin.gotoRaDec === "function") {
-        aladin.gotoRaDec(ra, dec);
+        path = "pointTo";
         ok = true;
       }
 
-      // FoV only when it meaningfully changes (avoids zoom-state thrash)
-      if (Number.isFinite(fov) && (force || Math.abs(fov - lastFovApplied) > 0.02)) {
+      // 2) Reinforce WASM center (in case public path no-ops under load)
+      if (wasm && typeof wasm.setCenter === "function") {
+        if (view) {
+          view.viewCenter = { ra, dec };
+        }
+        wasm.setCenter(ra, dec);
+        if (!ok) {
+          path = "wasm.setCenter";
+          ok = true;
+        } else {
+          path = path + "+wasm";
+        }
+      }
+
+      // 3) FoV when it changes (min cruise FoV keeps starfields readable)
+      if (Number.isFinite(fov) && (force || Math.abs(fov - lastFovApplied) > 0.03)) {
         lastFovApplied = fov;
-        if (typeof aladin.setFoV === "function") {
-          aladin.setFoV(fov);
-        } else if (typeof aladin.setFov === "function") {
-          aladin.setFov(fov);
-        } else if (view && typeof view.setFoV === "function") {
-          view.setFoV(fov);
-        } else if (wasm && typeof wasm.setFieldOfView === "function") {
+        if (typeof aladin.setFoV === "function") aladin.setFoV(fov);
+        else if (typeof aladin.setFov === "function") aladin.setFov(fov);
+        else if (view && typeof view.setFoV === "function") view.setFoV(fov);
+        else if (wasm && typeof wasm.setFieldOfView === "function") {
           wasm.setFieldOfView(fov);
         }
       }
 
-      // Nudge paint every push
-      if (view && typeof view.requestRedraw === "function") {
-        view.requestRedraw();
+      // 4) Force a paint this frame
+      if (view) {
+        view.needRedraw = true;
+        if (typeof view.requestRedraw === "function") view.requestRedraw();
       } else if (typeof aladin.requestRedraw === "function") {
         aladin.requestRedraw();
       }
@@ -234,7 +274,7 @@ export function createWindshield(
     }
 
     try {
-      window.__ncCam = { ra, dec, fov, ok, t: now, path: "wasm" };
+      window.__ncCam = { ra, dec, fov, ok, path, t: now };
     } catch {
       /* ignore */
     }
@@ -245,98 +285,107 @@ export function createWindshield(
     if (!view) return;
     cam.ra = Number(view.ra);
     cam.dec = Number(view.dec);
-    if (view.fov != null) cam.fov = Number(view.fov);
-    lastCamForFx = { ra: cam.ra, dec: cam.dec };
+    if (view.fov != null) cam.fov = Math.max(3.5, Number(view.fov));
     stopAladinAnimations();
+    applyCam(true);
     if (hard) {
-      // Hard jump: use public API so catalogs refresh once
-      try {
-        if (aladin?.view && typeof aladin.view.pointTo === "function") {
-          aladin.view.pointTo(cam.ra, cam.dec);
-        } else if (typeof aladin?.gotoRaDec === "function") {
-          aladin.gotoRaDec(cam.ra, cam.dec);
-        }
-        if (Number.isFinite(cam.fov)) {
-          if (typeof aladin?.setFoV === "function") aladin.setFoV(cam.fov);
-          else if (typeof aladin?.setFov === "function") aladin.setFov(cam.fov);
-        }
-        aladin?.view?.requestRedraw?.();
-        lastFovApplied = cam.fov;
-      } catch {
-        applyCam(true);
-      }
       setMotionBlur(0);
       fx?.setSkyFromView(cam);
-      fx?.panBy?.(0, 0);
+      fx?.setCamDelta?.(0, 0, 1 / 60);
       fx?.setThrottle(0);
-      return;
     }
-    applyCam(true);
   }
 
   /**
-   * Live glide toward target — throttle (0–1) scales degrees/sec (dt-aware).
-   * Always mutates cam and calls applyCam so Aladin updates.
-   * @param {object} target  {ra, dec, fov?}
+   * Live glide toward target. Mutates cam, pushes Aladin every frame, drives FX.
+   * @param {object} target {ra, dec, fov?}
    * @param {number} throttle 0–1
-   * @param {number} [dtSec] frame delta seconds (default ~1/60)
+   * @param {number} [dtSec]
    */
   function glideStep(target, throttle = 0.35, dtSec = 1 / 60) {
-    if (!target || !aladin) {
-      return { ...cam, distDeg: 0, speed: 0, applied: false };
+    if (!aladin) {
+      return { ...cam, distDeg: 0, speed: 0, applied: false, movedDeg: 0 };
     }
+    // Allow glide even without target: small drift so throttle always reads
+    const hasTarget =
+      target &&
+      Number.isFinite(Number(target.ra)) &&
+      Number.isFinite(Number(target.dec));
 
     const t = Math.max(0, Math.min(1, Number(throttle) || 0));
     const dt = Math.min(0.1, Math.max(0.001, Number(dtSec) || 1 / 60));
 
-    // Visible motion: t=0.35 → ~18°/s; t=1 → ~48°/s (was ~0.9°/frame ≈ 54°/s at 60fps)
-    // Keep strong so empty deep-sky fields still read as travel via coord + FX
-    const maxDegPerSec = t <= 0.02 ? 0 : 8 + t * 40;
+    // Visible travel: t=0.35 → ~22°/s, t=1 → ~55°/s
+    const maxDegPerSec = t <= 0.02 ? 0 : 12 + t * 43;
 
-    const dRa = wrapDeltaRa(Number(target.ra) - cam.ra);
-    const dDec = Number(target.dec) - cam.dec;
-    const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
-    const dist = Math.hypot(dRa * cos, dDec);
+    let dRa = 0;
+    let dDec = 0;
+    let dist = 0;
 
-    const approach = dist < 4 ? Math.max(0.25, dist / 4) : 1;
-    const stepDeg = maxDegPerSec * approach * dt;
+    if (hasTarget) {
+      dRa = wrapDeltaRa(Number(target.ra) - cam.ra);
+      dDec = Number(target.dec) - cam.dec;
+      const cos = Math.cos((cam.dec * Math.PI) / 180) || 1;
+      dist = Math.hypot(dRa * cos, dDec);
+    }
+
+    const approach = dist > 0 && dist < 5 ? Math.max(0.3, dist / 5) : 1;
+    let stepDeg = maxDegPerSec * approach * dt;
 
     const prevRa = cam.ra;
     const prevDec = cam.dec;
 
-    if (dist > 1e-4 && stepDeg > 0) {
-      const move = Math.min(stepDeg, dist);
-      const u = move / dist;
-      let nRa = cam.ra + dRa * u;
-      let nDec = cam.dec + dDec * u;
-      nRa = ((nRa % 360) + 360) % 360;
-      nDec = Math.max(-89.9, Math.min(89.9, nDec));
-      cam.ra = nRa;
-      cam.dec = nDec;
+    if (t > 0.02 && stepDeg > 0) {
+      if (hasTarget && dist > 1e-4) {
+        const move = Math.min(stepDeg, dist);
+        const u = move / dist;
+        let nRa = cam.ra + dRa * u;
+        let nDec = cam.dec + dDec * u;
+        nRa = ((nRa % 360) + 360) % 360;
+        nDec = Math.max(-89.9, Math.min(89.9, nDec));
+        cam.ra = nRa;
+        cam.dec = nDec;
+      } else if (!hasTarget) {
+        // No heading: gentle RA cruise so throttle still moves the glass
+        cam.ra = (((cam.ra + stepDeg * 0.35) % 360) + 360) % 360;
+      }
     }
 
-    // Soft FoV approach — keep a minimum cruise FoV so sky structure stays visible
-    if (target.fov != null && Number.isFinite(Number(target.fov))) {
-      const tFov = Math.max(2.2, Number(target.fov));
-      cam.fov = cam.fov + (tFov - cam.fov) * Math.min(1, (0.35 + t * 0.5) * dt * 4);
+    // Cruise FoV: keep wide enough that HiPS structure is readable while moving
+    if (hasTarget && target.fov != null && Number.isFinite(Number(target.fov))) {
+      const tFov = Math.max(4.0, Number(target.fov));
+      cam.fov = cam.fov + (tFov - cam.fov) * Math.min(1, (0.4 + t * 0.5) * dt * 3);
+    } else if (t > 0.04) {
+      // gently open FoV while flying if no target fov
+      const cruise = 6.5;
+      cam.fov = cam.fov + (cruise - cam.fov) * Math.min(1, dt * 1.5);
     }
 
-    const applied = applyCam(t > 0.02);
+    // ALWAYS push Aladin when throttle is up (force — skip rate limit)
+    const applied = t > 0.02 ? applyCam(true) : applyCam(false);
 
-    // FX parallax from actual cam delta (degrees → screen drift)
+    // Cam delta → screen pixels for FX streaks (same motion as sky)
     const dRaMove = wrapDeltaRa(cam.ra - prevRa);
     const dDecMove = cam.dec - prevDec;
     const cosFx = Math.cos((cam.dec * Math.PI) / 180) || 1;
-    // Scale deg → px: ~40 px per degree at typical glass size (feel, not exact)
-    const pxPerDeg = 48;
-    fx?.panBy?.(-dRaMove * cosFx * pxPerDeg, dDecMove * pxPerDeg);
+    // Stronger px scale so streaks are unmistakable on the glass
+    const pxPerDeg = 72;
+    const dxPx = -dRaMove * cosFx * pxPerDeg;
+    const dyPx = dDecMove * pxPerDeg;
+    const movedDeg = Math.hypot(dRaMove * cosFx, dDecMove);
+
+    // Drive FX from the same delta as Aladin
+    if (typeof fx?.setCamDelta === "function") {
+      fx.setCamDelta(dxPx, dyPx, dt, t);
+    } else {
+      fx?.panBy?.(dxPx, dyPx);
+    }
     fx?.setSkyFromView(cam);
     fx?.setThrottle(t);
 
-    const speed = t > 0.04 && dist > 0.02 ? Math.min(1, t) : 0;
-    lastGlideSpeed = speed * 0.55 + lastGlideSpeed * 0.45;
+    const speed = t > 0.04 && (dist > 0.02 || movedDeg > 0.001) ? Math.min(1, t) : t > 0.04 ? t * 0.5 : 0;
+    lastGlideSpeed = speed * 0.6 + lastGlideSpeed * 0.4;
     setMotionBlur(lastGlideSpeed);
-    lastCamForFx = { ra: cam.ra, dec: cam.dec };
 
     return {
       ra: cam.ra,
@@ -345,25 +394,27 @@ export function createWindshield(
       distDeg: dist,
       speed: lastGlideSpeed,
       applied,
-      movedDeg: Math.hypot(dRaMove * cosFx, dDecMove),
+      movedDeg,
+      dxPx,
+      dyPx,
     };
   }
 
   /**
-   * Instant nudge used when throttle keys/slider change (extra push).
+   * Immediate push on key/slider change (before next rAF).
    */
-  function throttleKick(target, throttle, dtSec = 1 / 30) {
-    if (!target) return null;
+  function throttleKick(target, throttle, dtSec = 1 / 24) {
+    if (!aladin) return null;
     const t = Math.max(0, Math.min(1, Number(throttle) || 0));
     if (t <= 0.02) {
       applyCam(true);
       fx?.setThrottle(0);
+      fx?.setCamDelta?.(0, 0, 1 / 60, 0);
       setMotionBlur(0);
       return getView();
     }
-    // One boosted step for immediate feedback on key/slider
-    const boost = Math.min(1, t + 0.2);
-    return glideStep(target, boost, Math.max(dtSec, 1 / 40));
+    // Boosted step so W/S feels instant
+    return glideStep(target, Math.min(1, t + 0.25), Math.max(dtSec, 1 / 30));
   }
 
   function setMotionBlur(amount) {
@@ -371,8 +422,7 @@ export function createWindshield(
     if (!stage) return;
     const a = Math.max(0, Math.min(1, amount));
     stage.style.setProperty("--glide", String(a));
-    stage.classList.toggle("is-gliding", a > 0.12);
-    // Intentionally do NOT filter/transform #aladin-lite-div — freezes WASM canvas
+    stage.classList.toggle("is-gliding", a > 0.08);
     const glass = document.querySelector(".aladin-glass, #aladin-lite-div");
     if (glass) {
       glass.style.filter = "none";
