@@ -1,10 +1,15 @@
 /**
  * Night Chapters — entry
  * Tagline: I want to see. I play.
+ * NC_BUILD 1.7.64 — Gumdrop wide FoV peripheral
  */
 
-import { bindKeys } from "./keys.js";
-import { startGame } from "./game-loop.js";
+// Ribbon default = unvisited story pin; candy/house soft-steal when close
+
+const NC_BUILD = "1.7.64";
+
+import { bindKeys } from "./keys.js?v=1.7.64";
+import { startGame, CORE_LOOP_VERSION } from "./game-loop.js?v=1.7.64";
 
 // Bind keyboard shell before game / sky boot
 bindKeys();
@@ -18,6 +23,13 @@ function main() {
 
   try {
     document.body.tabIndex = -1;
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    window.__ncBuild = CORE_LOOP_VERSION || NC_BUILD;
+    console.info(`[Night Chapters] build ${window.__ncBuild} · scanner live`);
   } catch {
     /* ignore */
   }

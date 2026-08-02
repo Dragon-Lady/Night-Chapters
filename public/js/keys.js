@@ -112,27 +112,45 @@ export function focusShell() {
   if (typeof document === "undefined") return;
   try {
     const ae = document.activeElement;
-    if (ae && ae.tagName === "CANVAS") {
+    // Prefer the sky stage when flying — it's the visible click target
+    const stage = document.getElementById("sky-stage");
+    const phase = document.body?.dataset?.phase || "";
+    const flying =
+      phase === "FLIGHT" ||
+      phase === "MYSTERY" ||
+      phase === "ARRIVE" ||
+      phase === "REST";
+
+    // Blur instrument traps (not the stage itself)
+    if (
+      ae &&
+      ae !== document.body &&
+      ae.id !== "nc-key-sink" &&
+      ae.id !== "sky-stage" &&
+      ae.closest &&
+      ae.closest("#instruments, #instruments-body, .modal-screen, .reflection-screen")
+    ) {
       try {
         ae.blur();
       } catch {
         /* ignore */
       }
     }
-    // Blur any contenteditable / sky canvas focus traps
-    if (ae && ae !== document.body && ae.id !== "nc-key-sink") {
-      if (ae.closest && ae.closest("#sky-canvas, #sky-stage, #aladin-lite-div")) {
-        try {
-          ae.blur();
-        } catch {
-          /* ignore */
-        }
+
+    document.body.tabIndex = -1;
+    if (flying && stage && typeof stage.focus === "function") {
+      try {
+        stage.focus({ preventScroll: true });
+        return;
+      } catch {
+        /* fall through to sink */
       }
     }
-    document.body.tabIndex = -1;
     const sink = ensureKeySink();
     if (sink) {
       sink.focus({ preventScroll: true });
+    } else if (stage) {
+      stage.focus({ preventScroll: true });
     } else {
       document.body.focus({ preventScroll: true });
     }

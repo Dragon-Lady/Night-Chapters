@@ -130,9 +130,42 @@ header .tagline {
     inset 0 0 80px rgba(30, 50, 90, 0.25);
   background: #000;
   transition: box-shadow 0.4s ease, border-color 0.4s ease;
+  /* Map is a real hit target — click to reclaim flight focus after modals/panel */
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
 }
 
-/* vignette only over the glass, not the whole page */
+/*
+ * Flight reticle cursor (v1.7.47) — NOT a second spaceship.
+ * The craft is drawn once on the glass center (drawCraftShip).
+ * Old yellow-nosed ship cursor read as "corn" / duplicate ship on warm sky.
+ * Soft ice crosshair only; hotspot at center.
+ */
+#sky-stage.craft-cursor,
+#sky-stage.craft-cursor #sky-canvas,
+#sky-stage.craft-cursor .sky-canvas {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Ccircle cx='14' cy='14' r='10' fill='none' stroke='%23a8d4ff' stroke-opacity='0.55' stroke-width='1'/%3E%3Ccircle cx='14' cy='14' r='2' fill='%23e8f4ff' fill-opacity='0.9'/%3E%3Cpath d='M14 2 L14 7 M14 21 L14 26 M2 14 L7 14 M21 14 L26 14' stroke='%23c8e4ff' stroke-opacity='0.75' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E")
+      14 14,
+    crosshair;
+}
+
+#sky-stage:focus {
+  outline: none;
+}
+
+#sky-stage:focus-visible {
+  border-color: rgba(158, 201, 255, 0.45);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.55),
+    inset 0 0 80px rgba(30, 50, 90, 0.25),
+    0 0 0 2px rgba(158, 201, 255, 0.35);
+}
+
+/*
+ * Soft glass vignette only — keep N/E/S/W rim + compass readable.
+ * v1.7.37: open center farther; lighter edge so canvas chrome punches through.
+ */
 #sky-stage::after {
   content: "";
   pointer-events: none;
@@ -140,9 +173,10 @@ header .tagline {
   inset: 0;
   z-index: 2;
   background: radial-gradient(
-    ellipse at 50% 40%,
-    transparent 42%,
-    rgba(0, 0, 0, 0.45) 100%
+    ellipse at 50% 45%,
+    transparent 58%,
+    rgba(0, 0, 0, 0.18) 82%,
+    rgba(0, 0, 0, 0.32) 100%
   );
 }
 
@@ -184,7 +218,10 @@ header .tagline {
   display: block;
   z-index: 0;
   background: #03040a;
-  pointer-events: none;
+  /* Receive clicks so map focus / resume works (stage also listens) */
+  pointer-events: auto;
+  cursor: crosshair; /* overridden by #sky-stage.craft-cursor while flying */
+  touch-action: none;
 }
 
 /* Legacy FX canvas hidden — sky owns stars/scenery */
@@ -210,6 +247,65 @@ header .tagline {
   z-index: 1;
   pointer-events: none;
   outline: none;
+}
+
+/* Passage hooks on the sky — above canvas + veil (2) + reticle (3) + flight bar (12) */
+.glass-whisper {
+  position: absolute;
+  left: 50%;
+  bottom: 3.6rem;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: min(92%, 34rem);
+  margin: 0;
+  padding: 0.65rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 220, 160, 0.55);
+  background: rgba(6, 10, 20, 0.92);
+  color: rgba(255, 242, 210, 0.98);
+  font-size: clamp(0.9rem, 2.2vw, 1.05rem);
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.55),
+    0 0 24px rgba(255, 210, 140, 0.12);
+  opacity: 0;
+}
+
+.glass-whisper.is-soft {
+  border-color: rgba(160, 200, 255, 0.35);
+  color: rgba(230, 240, 255, 0.98);
+}
+
+.glass-whisper.is-show {
+  /* ~0.7s in · ~12s hold · ~2.8s out ≈ 15.5s total (matches house/drift holdMs) */
+  animation: glass-whisper-life 15.5s ease forwards;
+}
+
+@keyframes glass-whisper-life {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  4.5% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  82% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+
+.glass-whisper[hidden] {
+  display: none !important;
+  animation: none;
 }
 
 /* On-glass flight toolbar — always clickable during flight */
@@ -1026,10 +1122,21 @@ kbd {
   padding: 1rem;
   background: rgba(3, 5, 12, 0.75);
   backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 
-.modal-screen[hidden] {
+/* Belt-and-suspenders: never leave an invisible full-screen trap over the map */
+.modal-screen[hidden],
+.modal-screen[aria-hidden="true"] {
   display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+.reflection-screen[aria-hidden="true"] {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
 }
 
 .modal-card {

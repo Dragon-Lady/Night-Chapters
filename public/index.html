@@ -15,7 +15,7 @@
       content="I want to see. I play. Gentle night flight — not a military sim."
     />
     <meta property="og:type" content="website" />
-    <link rel="stylesheet" href="./css/night.css" />
+    <link rel="stylesheet" href="./css/night.css?v=1.7.64" />
   </head>
   <body id="app">
     <header class="cockpit-top">
@@ -43,7 +43,12 @@
       </div>
     </header>
 
-    <div id="sky-stage">
+    <div
+      id="sky-stage"
+      tabindex="0"
+      role="application"
+      aria-label="Night sky windshield — click to fly. W/S throttle, A/D steer."
+    >
       <canvas
         id="sky-canvas"
         class="sky-canvas"
@@ -53,6 +58,14 @@
       <canvas id="fx-canvas" class="fx-canvas" aria-hidden="true" hidden></canvas>
       <div class="sky-veil" aria-hidden="true"></div>
       <div class="reticle" aria-hidden="true"></div>
+      <!-- On-glass whisper — above veil/reticle so hooks stay readable -->
+      <div
+        id="glass-whisper"
+        class="glass-whisper"
+        hidden
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
       <!-- Always-visible flight controls (when panel collapsed, still clickable) -->
       <div
         id="flight-bar"
@@ -250,6 +263,7 @@
       <kbd>Space</kbd> rest · Not a military sim
     </p>
 
-    <script type="module" src="./js/main.js"></script>
+    <!-- NC_BUILD 1.7.64 — pin scrub + ch1 ghosts -->
+    <script type="module" src="./js/main.js?v=1.7.64"></script>
   </body>
 </html>

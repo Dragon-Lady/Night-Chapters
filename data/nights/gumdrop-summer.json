@@ -15,12 +15,12 @@
     "survey": "P/Mellinger/color"
   },
   "score": { "story": 12, "drift": 28, "chapter": 45, "free": 6, "perfect_bonus": 20 },
-  "whisper_start": "Summer glass is sticky-sweet. Glide the triangle. Catch the gumdrop glows.",
+  "whisper_start": "Summer glass is sticky-sweet. Wide triangle: Porch star (Altair) → Lantern (Vega) → Dragon tail (Deneb). Candy glows are scattered across the whole sky — take the long way.",
   "pins": [
     {
       "id": "altair-porch",
       "label": "Porch star",
-      "note": "Altair — the bright porch light of summer. Wave at the dogs.",
+      "note": "Altair — the bright porch light of summer. Wave at the dogs. Sit a breath; W to leave when ready. The rest of the candy is far — look for the radar, not a pile at your feet.",
       "emotion": "play",
       "beat": "sit",
       "personal": true,
@@ -29,7 +29,7 @@
     {
       "id": "vega-lantern",
       "label": "Lantern",
-      "note": "Vega again, but warmer. Name one summer sound.",
+      "note": "Vega again, but warmer — a lantern high on the sticky night. Long climb northwest from the porch. Name one summer sound if you want.",
       "emotion": "joy",
       "beat": "emotion_word",
       "personal": true,
@@ -38,7 +38,7 @@
     {
       "id": "deneb-tail",
       "label": "Dragon tail",
-      "note": "Deneb — far and soft. The ribbon stretches.",
+      "note": "Deneb — far and soft. The dragon’s tail of the summer ribbon, opposite the long candy trail. Looking is playing.",
       "emotion": "wonder",
       "beat": "sit",
       "personal": true,
@@ -48,19 +48,36 @@
   "drift_mysteries": [
     {
       "id": "drift-gum-1",
-      "story_hook": "A gumdrop spark between porch and lantern…",
-      "seed": { "ra": 288.0, "dec": 24.0, "fov": 2.0 }
+      "label": "gumdrop spark",
+      "story_hook": "A gumdrop spark far west of the porch — sticky light on a long detour, not stacked on Altair.",
+      "seed": { "ra": 228.0, "dec": 10.0, "fov": 2.0 }
     },
     {
       "id": "drift-gum-2",
-      "story_hook": "Candy-colored dust off the summer triangle.",
-      "seed": { "ra": 305.0, "dec": 40.0, "fov": 1.8 }
+      "label": "candy dust",
+      "story_hook": "Candy-colored dust on the far side of the sky — past the dragon, not under its chin.",
+      "seed": { "ra": 42.0, "dec": 48.0, "fov": 1.8 }
     }
   ],
   "mystery": {
     "id": "mystery-gumdrop",
-    "story_hook": "The gumdrop itself — unlabeled. Press P and claim the sweet.",
-    "seed": { "ra": 290.5, "dec": 28.5, "fov": 1.4 },
+    "label": "the gumdrop",
+    "story_hook": "The gumdrop itself — unlabeled sweet in the open south-central sky. Press P and claim it for the house.",
+    "seed": { "ra": 155.0, "dec": 22.0, "fov": 1.4 },
     "claimed_label": null
-  }
+  },
+  "house_pins": [
+    {
+      "id": "house-summer-porch",
+      "label": "summer porch rail",
+      "short_label": "porch rail",
+      "note": "House light down the yard from Porch star — walk the rail, don’t sit on Altair’s lap.",
+      "emotion": "home",
+      "kind": "personal",
+      "landmark": "Porch star",
+      "whisper_notice": "📌 summer porch rail — warm wood a walk from the porch light.",
+      "whisper_center": "📌 “summer porch rail” — the dogs know this stretch of sky.",
+      "view": { "ra": 318.5, "dec": -11.0, "fov": 2.8, "name": "summer porch rail" }
+    }
+  ]
 }

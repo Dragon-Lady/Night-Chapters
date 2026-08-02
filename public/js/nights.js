@@ -115,6 +115,7 @@ function normalizeNight(n) {
   }
   n.drift_mysteries = n.drift_mysteries || [];
   n.pins = n.pins || [];
+  n.house_pins = Array.isArray(n.house_pins) ? n.house_pins : [];
   return n;
 }
 

@@ -1,9 +1,10 @@
 /**
  * Night Chapters — gentle ambient + soft cues via Web Audio API only.
  * No samples, no deps. Wonder-first; never harsh.
+ * NC_BUILD 1.7.33 — includes sensorPing for forward scanner
  *
  * Chapter ambients: rain | warm | cold | rose
- * Cues: pin chime, mystery hum, wind whoosh (throttle), rest = silence ambient
+ * Cues: pin chime, mystery hum, sensor ping, wind whoosh, rest = silence ambient
  */
 
 const PRESETS = {
@@ -329,6 +330,57 @@ export function createAudio() {
     tone({ freq: 440, type: "sine", dur: 0.12, gain: 0.03 });
   }
 
+  /**
+   * Forward sensor ping — quiet sonar-like blip (Star Trek soft, not arcade).
+   * strength 0–1 scales gain; pitch drops slightly when closing.
+   */
+  function sensorPing({ strength = 0.5, closing = false } = {}) {
+    if (!ensure() || muted || restSilent) return;
+    const s = Math.max(0.15, Math.min(1, Number(strength) || 0.5));
+    const base = closing ? 520 : 640;
+    const t0 = ctx.currentTime;
+    // Soft sine + faint bandpass noise tick
+    tone({
+      freq: base,
+      type: "sine",
+      dur: 0.22,
+      gain: 0.012 * s,
+      when: 0,
+    });
+    tone({
+      freq: base * 0.72,
+      type: "sine",
+      dur: 0.28,
+      gain: 0.007 * s,
+      when: 0.03,
+    });
+    try {
+      const bufferSize = 2048;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.12));
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.setValueAtTime(base * 1.1, t0);
+      bp.Q.setValueAtTime(4, t0);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.008 * s, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(cueGain);
+      src.start(t0);
+      src.stop(t0 + 0.2);
+    } catch {
+      /* optional noise tick */
+    }
+  }
+
   function setChapterMood(moodOrSky) {
     let mood = "rain";
     if (typeof moodOrSky === "string") mood = moodOrSky;
@@ -347,6 +399,7 @@ export function createAudio() {
     pinChime,
     mysteryHum,
     uiTap,
+    sensorPing,
     setChapterMood,
     setMuted,
     toggleMute,

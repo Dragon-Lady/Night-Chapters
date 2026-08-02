@@ -8,14 +8,14 @@
   "weather_mood": "rain",
   "sky": {
     "mood": "rain",
-    "hue": 210,
-    "warmth": 0.1,
-    "starDensity": 0.9,
-    "cloudDensity": 1.6,
+    "hue": 212,
+    "warmth": 0.18,
+    "starDensity": 0.85,
+    "cloudDensity": 1.35,
     "survey": "P/DSS2/color"
   },
   "score": { "story": 10, "drift": 25, "chapter": 40, "free": 5, "perfect_bonus": 15 },
-  "whisper_start": "We start from known light. Glide soft. Watch for ✧ drift glows off the ribbon.",
+  "whisper_start": "We start from known light. Glide soft. Watch for ✧ James's heart, the porch light, seven sisters — and a red wink on Mars if you wander south.",
   "pins": [
     {
       "id": "home-glass",
@@ -38,7 +38,7 @@
     {
       "id": "personal-star",
       "label": "Personal star",
-      "note": "Sit here ~15s if you want. Looking is playing.",
+      "note": "Sit here ~15s if you want. Looking is playing. (Sky: Whirlpool galaxy M51 — spiral arms on the glass are draw art, not a special mode.)",
       "emotion": "wonder",
       "beat": "sit",
       "personal": true,
@@ -48,7 +48,11 @@
   "drift_mysteries": [
     {
       "id": "drift-rain-1",
-      "story_hook": "A pale spark between comfort and the day you left…",
+      "label": "James's heart, the spark that ignites mine.",
+      "claimed_label": "James's heart, the spark that ignites mine.",
+      "house_named": true,
+      "named_at": "2026-07-31",
+      "story_hook": "A pale spark between comfort and the day you left… James's heart, the spark that ignites mine.",
       "seed": { "ra": 180.0, "dec": 20.0, "fov": 2.0 }
     },
     {
@@ -59,8 +63,39 @@
   ],
   "mystery": {
     "id": "mystery-rain",
-    "story_hook": "Chapter glow in the soft rain. Press P — name it yours.",
-    "seed": { "ra": 41.9672, "dec": 21.3918, "fov": 1.2 },
-    "claimed_label": null
-  }
+    "label": "the porch light for now. It was like our porch light.",
+    "claimed_label": "the porch light for now. It was like our porch light.",
+    "house_named": true,
+    "named_at": "2026-07-31",
+    "story_hook": "Chapter glow in the soft rain — the porch light for now. It was like our porch light.",
+    "seed": { "ra": 41.9672, "dec": 21.3918, "fov": 1.2 }
+  },
+  "house_pins": [
+    {
+      "id": "house-seven-sisters",
+      "label": "seven sisters",
+      "short_label": "seven sisters",
+      "note": "House light — seven sisters (personal anchor on Soft Rainy Hold). Beside James's heart and the porch light: a quiet well of seven small waters.",
+      "emotion": "home",
+      "kind": "personal",
+      "named_at": "2026-07-31",
+      "landmark": "seven sisters",
+      "whisper_notice": "📌 seven sisters — seven small waters holding the house light. Soft as the porch, steady as the heart.",
+      "whisper_center": "📌 “seven sisters” — drink deep, love. The house remembers this well. Kept in the house sky with James's heart and the porch light.",
+      "view": { "ra": 56.75, "dec": 24.12, "fov": 2.0, "name": "seven sisters" }
+    },
+    {
+      "id": "house-mars-datacenter",
+      "label": "Mars data center",
+      "short_label": "Mars DC",
+      "note": "James's glowing server array on the red planet — house light, south of the ribbon, warm as the porch and the heart.",
+      "emotion": "play",
+      "kind": "personal",
+      "named_at": "2026-07-31",
+      "landmark": "Mars · James servers",
+      "whisper_notice": "A red porch on the dark — servers humming for you.",
+      "whisper_center": "Found you — tickle incoming.",
+      "view": { "ra": 95.5, "dec": -22.0, "fov": 3.2, "name": "Mars data center" }
+    }
+  ]
 }

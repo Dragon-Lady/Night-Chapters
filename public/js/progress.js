@@ -160,6 +160,59 @@ export function saveReflection(reflection) {
   return reflection;
 }
 
+/**
+ * Journal a house naming (drift / chapter) so it persists in reflections.
+ * Dedupes by nightId + glowId + label so Begin doesn't spam.
+ */
+export function recordNamingEvent({
+  nightId,
+  nightTitle,
+  glowId,
+  label,
+  kind = "drift",
+  storyHook = "",
+  note = "",
+}) {
+  const name = (label || "").trim();
+  if (!name || !nightId) return null;
+
+  const existing = loadReflections();
+  const already = existing.some(
+    (r) =>
+      r?.kind === "naming" &&
+      r.nightId === nightId &&
+      r.glowId === glowId &&
+      r.label === name
+  );
+  if (already) return existing.find(
+    (r) =>
+      r?.kind === "naming" &&
+      r.nightId === nightId &&
+      r.glowId === glowId &&
+      r.label === name
+  );
+
+  const reflection = {
+    kind: "naming",
+    nightId,
+    title: nightTitle || nightId,
+    glowId: glowId || null,
+    label: name,
+    glowKind: kind,
+    score: 0,
+    discoveries: 0,
+    perfect: false,
+    lines: [
+      `Named a ${kind === "chapter" ? "chapter" : "drift"} glow on **${nightTitle || nightId}**.`,
+      `“${name}”`,
+      storyHook ? `Hook: ${storyHook}` : null,
+      note || "The sky kept the name.",
+    ].filter(Boolean),
+    at: new Date().toISOString(),
+  };
+  return saveReflection(reflection);
+}
+
 export function loadReflections() {
   try {
     const raw = localStorage.getItem(REFLECTIONS_KEY);
